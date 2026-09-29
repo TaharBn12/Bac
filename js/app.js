@@ -11,6 +11,7 @@ const STORAGE_KEY  = 'ayaBacData.v1';
 const AUTH_KEY     = 'ayaBacAuth';
 const REMEMBER_KEY = 'ayaBacRemember';
 const ADMIN_KEY_STORE = 'ayaBacAdmin';
+const NEXT_KEY     = 'ayaBacNext';
 
 /* ============ أدوات عامة ============ */
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -184,7 +185,27 @@ function lessonPath(data, lessonId) {
 function isAuthed() {
   return sessionStorage.getItem(AUTH_KEY) === '1' || localStorage.getItem(REMEMBER_KEY) === '1';
 }
-function requireAuth() { if (!isAuthed()) location.replace('index.html'); }
+/* الصفحات المحمية: إن لم يكن داخلاً نحفظ وجهته ونحوله لصفحة الدخول،
+   وبعد الدخول يعود تلقائياً إلى نفس الصفحة (وليس للرئيسية) */
+function requireAuth() {
+  if (!isAuthed()) {
+    try {
+      sessionStorage.setItem(NEXT_KEY, location.pathname.split('/').pop() + location.search);
+    } catch (e) { /* تجاهل */ }
+    location.replace('index.html');
+  }
+}
+
+/* وجهة العودة بعد تسجيل الدخول (صفحات الموقع فقط — لا روابط خارجية) */
+function afterLoginUrl() {
+  var next = '';
+  try {
+    next = sessionStorage.getItem(NEXT_KEY) || '';
+    sessionStorage.removeItem(NEXT_KEY);
+  } catch (e) { /* تجاهل */ }
+  if (!/^[a-z]+\.html(\?.*)?$/i.test(next)) next = 'home.html';
+  return next;
+}
 
 function doLogin(password, remember) {
   if (password === APP_PASSWORD) {

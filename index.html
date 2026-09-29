@@ -76,9 +76,10 @@
       var ok = doLogin(pwInput.value, $('#remember').checked);
       if (ok) {
         var btn = $('#loginBtn');
+        var target = afterLoginUrl(); /* العودة للصفحة المقصودة إن وُجدت */
         btn.innerHTML = svgIcon('check') + ' تم الدخول، جارٍ التحويل...';
         btn.disabled = true;
-        setTimeout(function () { location.href = 'home.html'; }, 700);
+        setTimeout(function () { location.href = target; }, 700);
       } else {
         errBox.hidden = false;
         card.classList.remove('shake');

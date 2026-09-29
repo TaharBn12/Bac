@@ -16,9 +16,10 @@ var sel = { subject: '', unit: '', lesson: '' };
 var pickedFiles = {}; /* ملفات مختارة مؤقتاً في نماذج الإضافة: pickedFiles[key] = File */
 
 function initAdmin() {
-  requireAuth();
   hydrateIcons();
 
+  /* لوحة التحكم محمية بكلمة مرور الإدارة نفسها (البوابة أدناه)
+     — لا تشترط تسجيل الدخول للموقع، ففتحها مباشرة يعرض البوابة فوراً */
   if (!isAdminUnlocked()) {
     $('#adminGate').hidden = false;
     bindGate();
