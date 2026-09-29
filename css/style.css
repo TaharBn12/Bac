@@ -493,6 +493,27 @@ select.inp option[value=''] { color: var(--muted); }
   border-radius: 14px; padding: 14px 18px; font-size: 13.5px; color: #ffe9b3; margin-bottom: 18px;
 }
 
+/* ============ حالة السحابة ============ */
+.cloud-badge {
+  pointer-events: none; font-size: 12.5px; padding: 5px 13px;
+  border-radius: 999px; font-weight: 800;
+  border: 1px solid var(--border); color: var(--muted);
+}
+.cloud-badge.ok   { color: var(--ok); border-color: rgba(61, 220, 151, 0.4); background: rgba(61, 220, 151, 0.1); }
+.cloud-badge.warn { color: #ffc75d; border-color: rgba(255, 199, 93, 0.4); background: rgba(255, 199, 93, 0.1); }
+.cloud-badge.off  { color: var(--muted); }
+
+.cloud-banner {
+  background: rgba(255, 199, 93, 0.08); border: 1px solid rgba(255, 199, 93, 0.35);
+  color: #ffe3ae; border-radius: 14px; padding: 15px 18px;
+  font-size: 13.5px; margin-bottom: 18px; line-height: 2;
+}
+.cloud-banner b { color: #ffd27a; }
+.cloud-banner code {
+  background: rgba(0, 0, 0, 0.35); padding: 1px 8px; border-radius: 6px;
+  direction: ltr; display: inline-block; font-size: 12.5px;
+}
+
 /* ============ التوست ============ */
 .toast {
   position: fixed; bottom: 24px; inset-inline: 0; margin: 0 auto; width: max-content;

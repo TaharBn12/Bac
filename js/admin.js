@@ -37,6 +37,7 @@ function bindGate() {
     e.preventDefault();
     if (unlockAdmin($('#gatePw').value)) {
       $('#adminGate').hidden = true;
+      if (typeof Cloud !== 'undefined' && Cloud.mode === 'cloud') Cloud.makeAdmin();
       showApp();
     } else {
       $('#gateErr').hidden = false;
@@ -49,40 +50,84 @@ function bindGate() {
 }
 
 function showApp() {
-  data = loadData();
-
-  /* رابط مباشر لدرس معين: admin.html?lesson=xxx */
-  var lessonId = param('lesson');
-  if (lessonId && getLesson(data, lessonId)) {
-    var path = lessonPath(data, lessonId);
-    if (path.subject && path.unit) {
-      sel.subject = path.subject.id;
-      sel.unit = path.unit.id;
-      sel.lesson = path.lesson.id;
-      currentTab = 'content';
-    }
-  } else {
-    var s0 = data.subjects.slice().sort(byOrder)[0];
-    if (s0) sel.subject = s0.id;
-    var u0 = s0 ? unitsOf(data, s0.id)[0] : null;
-    if (u0) sel.unit = u0.id;
-    var l0 = u0 ? lessonsOf(data, u0.id)[0] : null;
-    if (l0) sel.lesson = l0.id;
-  }
-
   $('#adminApp').hidden = false;
   $('#logoutBtn').addEventListener('click', doLogout);
 
-  $('#tabsNav').addEventListener('click', function (e) {
-    var t = e.target.closest('.tab');
-    if (!t) return;
-    currentTab = t.dataset.tab;
-    $all('.tab').forEach(function (x) { x.classList.remove('active'); });
-    t.classList.add('active');
+  /* الاتصال بالسحابة أولاً ثم تحميل البيانات */
+  initData().then(function () {
+    data = loadData();
+
+    /* أول مرة على سحابة فارغة → نزرع المحتوى الافتراضي تلقائياً */
+    if (isCloudMode() && Cloud.isEmpty(data)) {
+      data = JSON.parse(JSON.stringify(window.DEFAULT_DATA));
+      saveData(data);
+      toast('🌱 تمت تهيئة المحتوى الأولي في السحابة');
+    }
+
+    updateCloudBadge();
+
+    /* رابط مباشر لدرس معين: admin.html?lesson=xxx */
+    var lessonId = param('lesson');
+    if (lessonId && getLesson(data, lessonId)) {
+      var path = lessonPath(data, lessonId);
+      if (path.subject && path.unit) {
+        sel.subject = path.subject.id;
+        sel.unit = path.unit.id;
+        sel.lesson = path.lesson.id;
+        currentTab = 'content';
+      }
+    } else {
+      var s0 = data.subjects.slice().sort(byOrder)[0];
+      if (s0) sel.subject = s0.id;
+      var u0 = s0 ? unitsOf(data, s0.id)[0] : null;
+      if (u0) sel.unit = u0.id;
+      var l0 = u0 ? lessonsOf(data, u0.id)[0] : null;
+      if (l0) sel.lesson = l0.id;
+    }
+
+    $('#tabsNav').addEventListener('click', function (e) {
+      var t = e.target.closest('.tab');
+      if (!t) return;
+      currentTab = t.dataset.tab;
+      $all('.tab').forEach(function (x) { x.classList.remove('active'); });
+      t.classList.add('active');
+      renderPanel();
+    });
+
     renderPanel();
   });
+}
 
-  renderPanel();
+/* شارة حالة السحابة أعلى اللوحة */
+function updateCloudBadge() {
+  var el = $('#cloudStatus');
+  if (!el) return;
+  if (isCloudMode()) {
+    el.textContent = '☁️ متصل بالسحابة';
+    el.className = 'cloud-badge ok';
+  } else if (typeof Cloud !== 'undefined' && Cloud.setupMissing) {
+    el.textContent = '⚠️ أكمل ربط Supabase';
+    el.className = 'cloud-badge warn';
+  } else {
+    el.textContent = '💾 وضع محلي';
+    el.className = 'cloud-badge off';
+  }
+}
+
+/* تنبيه يظهر أعلى اللوحات عندما لا تكون السحابة متصلة */
+function cloudBannerHTML() {
+  if (isCloudMode()) return '';
+  if (typeof Cloud !== 'undefined' && Cloud.setupMissing) {
+    return '<div class="cloud-banner">⚠️ <b>لم تُنشأ جداول Supabase بعد.</b><br>' +
+      'خطوات الربط (مرة واحدة فقط):<br>' +
+      '1️⃣ افتح مشروعك في <code>supabase.com/dashboard</code><br>' +
+      '2️⃣ من القائمة الجانبية اختر <b>SQL Editor</b><br>' +
+      '3️⃣ انسخ محتوى ملف <code>supabase-setup.sql</code> (الموجود مع ملفات الموقع) والصقه ثم اضغط <b>Run</b><br>' +
+      '4️⃣ أعد فتح لوحة التحكم — ستتحول الشارة إلى «☁️ متصل بالسحابة» ✅<br>' +
+      '<span style="opacity:.8">حتى ذلك الحين يعمل الموقع بالوضع المحلي: المحتوى يُحفظ على هذا الجهاز فقط.</span></div>';
+  }
+  return '<div class="cloud-banner">💾 <b>الوضع المحلي:</b> تعذّر الوصول إلى Supabase الآن، لذا يُحفظ المحتوى على هذا الجهاز فقط. ' +
+    'عند عودة الاتصال وتسجيل الدخول من جديد ستُزامَن التعديلات تلقائياً.</div>';
 }
 
 /* ============ أدوات خاصة باللوحة ============ */
@@ -210,6 +255,8 @@ function renderPanel() {
   else if (currentTab === 'lessons') renderLessonsPanel(p);
   else if (currentTab === 'content') renderContentPanel(p);
   else if (currentTab === 'backup') renderBackupPanel(p);
+  var banner = cloudBannerHTML();
+  if (banner) p.insertAdjacentHTML('afterbegin', banner);
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -564,7 +611,7 @@ function addResource(area, lesson, kind, exerciseType) {
       data.resources.push({
         id: uid('r'), lessonId: lesson.id, kind: kind,
         title: title || file.name.replace(/\.[^.]+$/, ''),
-        url: 'idb:' + fid, size: file.size,
+        url: fid, size: file.size,
         exerciseType: exerciseType || undefined,
         order: maxOrder + 1
       });
@@ -593,12 +640,37 @@ function addResource(area, lesson, kind, exerciseType) {
 
 /* ---------- لوحة النسخ الاحتياطي ---------- */
 function renderBackupPanel(p) {
+  var cloudBox;
+  if (isCloudMode()) {
+    cloudBox =
+      '<div class="frm-card">' +
+        '<h3 class="sub-title" style="margin-top:0">☁️ السحابة (Supabase) — <span style="color:var(--ok)">متصلة</span></h3>' +
+        '<p class="hint">كل تعديل تُجريه هنا يُحفَظ تلقائياً في السحابة ويظهر لجميع زوار الموقع.</p>' +
+        '<div class="frm-row">' +
+          '<button class="btn btn-primary" id="syncNowBtn">🔄 مزامنة الآن</button>' +
+          '<button class="btn" id="reloadCloudBtn">☁️ إعادة التحميل من السحابة</button>' +
+        '</div>' +
+      '</div>';
+  } else {
+    cloudBox =
+      '<div class="frm-card">' +
+        '<h3 class="sub-title" style="margin-top:0">☁️ السحابة (Supabase) — <span style="color:#ffc75d">غير متصلة</span></h3>' +
+        '<p class="hint">' +
+          (typeof Cloud !== 'undefined' && Cloud.setupMissing
+            ? 'أنشئ الجداول بتنفيذ ملف <b>supabase-setup.sql</b> في SQL Editor داخل لوحة Supabase (انظر التنبيه أعلى الصفحة).'
+            : 'تعذّر الوصول إلى Supabase حالياً — المحتوى يُحفَظ محلياً وسيُزامَن تلقائياً عند عودة الاتصال.') +
+        '</p>' +
+      '</div>';
+  }
+
   p.innerHTML =
     '<h2>💾 النسخ الاحتياطي والاستعادة</h2>' +
     '<p class="hint">صدّر كل بيانات الموقع (المواد، الوحدات، الدروس، الروابط) في ملف واحد، أو استوردها على جهاز آخر.</p>' +
 
-    '<div class="note-box">⚠️ ملاحظة: الملفات المرفوعة من الجهاز (فيديوهات وPDF) تُخزَّن داخل متصفحك ولا تُصدَّر مع النسخة الاحتياطية — ' +
-    'انقلها عبر روابط خارجية إن أردت نقلها بين الأجهزة.</div>' +
+    cloudBox +
+
+    '<div class="note-box">⚠️ ملاحظة: الملفات المرفوعة في الوضع المحلي (بدون سحابة) تُخزَّن داخل متصفحك ولا تُصدَّر مع النسخة الاحتياطية — ' +
+    'عند اتصال Supabase تُرفع الملفات إلى السحابة وتكون متاحة للجميع.</div>' +
 
     '<div class="frm-card">' +
       '<div class="frm-row">' +
@@ -615,6 +687,25 @@ function renderBackupPanel(p) {
         '➕ ' + data.resources.length + ' عنصر محتوى' +
       '</div>' +
     '</div>';
+
+  var syncBtn = $('#syncNowBtn');
+  if (syncBtn) syncBtn.addEventListener('click', function () {
+    Cloud.syncAll(data).then(function () {
+      toast(Cloud.lastError ? '⚠️ فشلت المزامنة — حاول مجدداً' : '✅ تمت المزامنة مع السحابة', Cloud.lastError ? 'err' : 'ok');
+    });
+  });
+  var reloadBtn = $('#reloadCloudBtn');
+  if (reloadBtn) reloadBtn.addEventListener('click', function () {
+    Cloud.loadAll().then(function (d) {
+      data = d;
+      window.CLOUD_DATA = d;
+      sel = { subject: '', unit: '', lesson: '' };
+      renderPanel();
+      toast('✅ تم تحميل أحدث نسخة من السحابة');
+    }).catch(function () {
+      toast('⚠️ تعذّر التحميل من السحابة', 'err');
+    });
+  });
 
   $('#exportBtn').addEventListener('click', function () {
     var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -650,10 +741,14 @@ function renderBackupPanel(p) {
   });
 
   $('#resetBtn').addEventListener('click', function () {
-    if (confirm('سيتم حذف كل التعديلات والعودة للمحتوى الافتراضي. متابعة؟')) {
+    if (confirm('سيتم حذف كل التعديلات والعودة للمحتوى الافتراضي' +
+        (isCloudMode() ? ' (في السحابة أيضاً)' : '') + '. متابعة؟')) {
       data = resetData();
+      window.CLOUD_DATA = data;
+      save(); /* في الوضع السحابي: يُعاد ضبط السحابة أيضاً */
       sel = { subject: '', unit: '', lesson: '' };
       renderPanel();
+      updateCloudBadge();
       toast('🔄 تمت إعادة التعيين');
     }
   });

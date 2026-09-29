@@ -4,11 +4,12 @@
 'use strict';
 
 /* ============ الإعدادات ============ */
-const APP_PASSWORD = 'aya 2026'; // ← كلمة السر (يمكنك تغييرها من هنا فقط)
+/* كلمة السر: تُقرأ من js/supabase-config.js (ADMIN_KEY) إن وُجدت */
+var APP_PASSWORD = (typeof ADMIN_KEY !== 'undefined' && ADMIN_KEY) ? ADMIN_KEY : 'aya 2026';
 const STORAGE_KEY  = 'ayaBacData.v1';
 const AUTH_KEY     = 'ayaBacAuth';
 const REMEMBER_KEY = 'ayaBacRemember';
-const ADMIN_KEY    = 'ayaBacAdmin';
+const ADMIN_KEY_STORE = 'ayaBacAdmin';
 
 /* ============ أدوات عامة ============ */
 function $(sel, root) { return (root || document).querySelector(sel); }
@@ -61,8 +62,27 @@ function breadcrumb(items) {
   }).join('<span class="sep">/</span>') + '</nav>';
 }
 
-/* ============ البيانات (localStorage) ============ */
+/* ============ البيانات (سحابية + محلية) ============ */
+/* تُنادى قبل أي عرض للصفحة: تحاول الاتصال بـ Supabase ثم تحميل المحتوى */
+function initData() {
+  if (typeof Cloud !== 'undefined' && Cloud && typeof Cloud.connect === 'function') {
+    return Cloud.connect().catch(function (e) {
+      console.warn('Supabase غير متاح — العمل بالوضع المحلي:', e && e.message);
+      return null;
+    });
+  }
+  return Promise.resolve();
+}
+
+function isCloudMode() {
+  return typeof Cloud !== 'undefined' && Cloud.mode === 'cloud' && window.CLOUD_DATA;
+}
+
 function loadData() {
+  /* الوضع السحابي: البيانات المحمّلة من Supabase */
+  if (isCloudMode()) return window.CLOUD_DATA;
+
+  /* الوضع المحلي: من ذاكرة المتصفح */
   try {
     var raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -74,8 +94,22 @@ function loadData() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh));
   return fresh;
 }
-function saveData(data) { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); }
-function resetData() { localStorage.removeItem(STORAGE_KEY); return loadData(); }
+
+function saveData(data) {
+  if (isCloudMode()) {
+    window.CLOUD_DATA = data;
+    Cloud.syncAll(data);
+    return;
+  }
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+}
+
+function resetData() {
+  localStorage.removeItem(STORAGE_KEY);
+  /* في الوضع السحابي: نعيد الافتراضي في الذاكرة والمزامنة تُحدّث السحابة */
+  if (isCloudMode()) return JSON.parse(JSON.stringify(window.DEFAULT_DATA));
+  return loadData();
+}
 
 function getSubject(data, id) { return data.subjects.find(function (s) { return s.id === id; }) || null; }
 function getUnit(data, id)    { return data.units.find(function (u) { return u.id === id; }) || null; }
@@ -116,13 +150,13 @@ function doLogin(password, remember) {
 }
 function doLogout() {
   sessionStorage.removeItem(AUTH_KEY);
-  sessionStorage.removeItem(ADMIN_KEY);
+  sessionStorage.removeItem(ADMIN_KEY_STORE);
   localStorage.removeItem(REMEMBER_KEY);
   location.href = 'index.html';
 }
-function isAdminUnlocked() { return sessionStorage.getItem(ADMIN_KEY) === '1'; }
+function isAdminUnlocked() { return sessionStorage.getItem(ADMIN_KEY_STORE) === '1'; }
 function unlockAdmin(password) {
-  if (password === APP_PASSWORD) { sessionStorage.setItem(ADMIN_KEY, '1'); return true; }
+  if (password === APP_PASSWORD) { sessionStorage.setItem(ADMIN_KEY_STORE, '1'); return true; }
   return false;
 }
 
@@ -138,13 +172,18 @@ function openFilesDB() {
   });
   return _dbPromise;
 }
-function filePut(file) { /* يحفظ ملفاً ويعيد معرّفه */
+function filePut(file) { /* يحفظ ملفاً ويعيد رابطه الداخلي (sb: للسحابة / idb: محلياً) */
+  /* الوضع السحابي: الرفع إلى Supabase Storage */
+  if (typeof Cloud !== 'undefined' && Cloud.mode === 'cloud') {
+    return Cloud.uploadFile(file).then(function (path) { return 'sb:' + path; });
+  }
+  /* الوضع المحلي: IndexedDB */
   return openFilesDB().then(function (db) {
     var rec = { id: uid('f'), name: file.name, mime: file.type, size: file.size, blob: file };
     return new Promise(function (resolve, reject) {
       var tx = db.transaction('files', 'readwrite');
       tx.objectStore('files').put(rec);
-      tx.oncomplete = function () { resolve(rec.id); };
+      tx.oncomplete = function () { resolve("idb:" + rec.id); };
       tx.onerror = function () { reject(tx.error); };
     });
   });
@@ -176,6 +215,7 @@ function youtubeId(url) {
   return m ? m[1] : null;
 }
 function isIdbUrl(url) { return String(url || '').indexOf('idb:') === 0; }
+function isSbUrl(url)  { return String(url || '').indexOf('sb:') === 0; }
 
 var _objURLs = new Map();
 /* يحوّل أي رابط (مباشر / مرفوع / يوتيوب) إلى مصدر قابل للتشغيل */
@@ -183,6 +223,15 @@ function resolveSrc(url) {
   url = String(url || '').trim();
   var yt = youtubeId(url);
   if (yt) return Promise.resolve({ kind: 'youtube', id: yt });
+  if (isSbUrl(url)) {
+    /* ملف مرفوع في Supabase Storage → رابطه العام */
+    var path = url.slice(3);
+    var src = (typeof Cloud !== 'undefined' && Cloud.publicUrl)
+      ? Cloud.publicUrl(path)
+      : SUPABASE_URL + '/storage/v1/object/public/media/' + path;
+    var name = (typeof Cloud !== 'undefined' && Cloud.fileName) ? Cloud.fileName(path) : 'file';
+    return Promise.resolve({ kind: 'src', src: src, fileName: name });
+  }
   if (isIdbUrl(url)) {
     var id = url.slice(4);
     if (_objURLs.has(id)) {
@@ -207,6 +256,10 @@ function guessFileName(url) {
 
 /* حذف ملف مرفوع مرتبط بمورد (عند حذف المورد) */
 function deleteFileIfUploaded(url) {
+  url = String(url || '');
+  if (isSbUrl(url) && typeof Cloud !== 'undefined' && Cloud.mode === 'cloud') {
+    return Cloud.removeFile(url.slice(3));
+  }
   if (isIdbUrl(url)) return fileDelete(url.slice(4));
   return Promise.resolve();
 }
