@@ -24,7 +24,7 @@ AyaPlayer.prototype.buildControls = function () {
     '<video id="vpVideo" playsinline preload="metadata"></video>' +
 
     '<div class="vp-center" id="vpCenter">' +
-      '<button class="vp-bigplay" id="vpBigPlay" aria-label="تشغيل">▶</button>' +
+      '<button class="vp-bigplay" id="vpBigPlay" aria-label="تشغيل">' + svgIcon('play') + '</button>' +
     '</div>' +
     '<div class="vp-now" id="vpNow"></div>' +
 
@@ -33,13 +33,13 @@ AyaPlayer.prototype.buildControls = function () {
         '<input type="range" class="vp-range" id="vpSeek" min="0" max="1000" value="0" step="1" aria-label="شريط التقدم">' +
       '</div>' +
       '<div class="vp-row">' +
-        '<button class="vp-btn" id="vpPlay" title="تشغيل / إيقاف">▶</button>' +
-        '<button class="vp-btn" id="vpBack" title="إرجاع 10 ثوان">⏪</button>' +
-        '<button class="vp-btn" id="vpFwd" title="تقديم 10 ثوان">⏩</button>' +
+        '<button class="vp-btn" id="vpPlay" title="تشغيل / إيقاف">' + svgIcon('play') + '</button>' +
+        '<button class="vp-btn" id="vpBack" title="إرجاع 10 ثوان">' + svgIcon('rewind') + '</button>' +
+        '<button class="vp-btn" id="vpFwd" title="تقديم 10 ثوان">' + svgIcon('forward') + '</button>' +
         '<span class="vp-time" id="vpTime">0:00 / 0:00</span>' +
         '<span class="vp-spacer"></span>' +
         '<span class="vp-vol">' +
-          '<button class="vp-btn" id="vpMute" title="كتم الصوت">🔊</button>' +
+          '<button class="vp-btn" id="vpMute" title="كتم الصوت">' + svgIcon('volume-high') + '</button>' +
           '<input type="range" class="vp-range" id="vpVol" min="0" max="1" step="0.05" value="1" aria-label="مستوى الصوت">' +
         '</span>' +
         '<select class="vp-speed" id="vpSpeed" title="سرعة التشغيل">' +
@@ -47,9 +47,9 @@ AyaPlayer.prototype.buildControls = function () {
           '<option value="1" selected>1x</option><option value="1.25">1.25x</option>' +
           '<option value="1.5">1.5x</option><option value="2">2x</option>' +
         '</select>' +
-        (document.pictureInPictureEnabled ? '<button class="vp-btn" id="vpPip" title="نافذة عائمة">⧉</button>' : '') +
-        '<a class="vp-btn vp-dl" id="vpDl" title="تنزيل الفيديو" download hidden>⬇</a>' +
-        '<button class="vp-btn" id="vpFs" title="ملء الشاشة">⛶</button>' +
+        (document.pictureInPictureEnabled ? '<button class="vp-btn" id="vpPip" title="نافذة عائمة">' + svgIcon('pip') + '</button>' : '') +
+        '<a class="vp-btn vp-dl" id="vpDl" title="تنزيل الفيديو" download hidden>' + svgIcon('download') + '</a>' +
+        '<button class="vp-btn" id="vpFs" title="ملء الشاشة">' + svgIcon('fullscreen') + '</button>' +
       '</div>' +
     '</div>' +
     '<div class="player-error" id="vpError" hidden></div>' +
@@ -129,16 +129,16 @@ AyaPlayer.prototype.bindEvents = function () {
     self.updateTime();
   });
   this.video.addEventListener('play', function () {
-    self.playBtn.textContent = '⏸';
+    self.playBtn.innerHTML = svgIcon('pause');
     self.center.style.display = 'none';
     self.scheduleIdle();
   });
   this.video.addEventListener('pause', function () {
-    self.playBtn.textContent = '▶';
+    self.playBtn.innerHTML = svgIcon('play');
     self.center.style.display = '';
     self.wake();
   });
-  this.video.addEventListener('ended', function () { self.playBtn.textContent = '▶'; self.wake(); });
+  this.video.addEventListener('ended', function () { self.playBtn.innerHTML = svgIcon('play'); self.wake(); });
   this.video.addEventListener('error', function () {
     if (!self.video.src) return;
     self.showError('تعذّر تشغيل الفيديو',
@@ -176,7 +176,8 @@ AyaPlayer.prototype.updateTime = function () {
 };
 
 AyaPlayer.prototype.updateVolIcon = function () {
-  this.muteBtn.textContent = (this.video.muted || this.video.volume === 0) ? '🔇' : (this.video.volume < 0.5 ? '🔉' : '🔊');
+  var n = (this.video.muted || this.video.volume === 0) ? 'volume-mute' : (this.video.volume < 0.5 ? 'volume-low' : 'volume-high');
+  this.muteBtn.innerHTML = svgIcon(n);
 };
 
 AyaPlayer.prototype.wake = function () {
@@ -207,7 +208,7 @@ AyaPlayer.prototype.showLoading = function (on) {
 AyaPlayer.prototype.showError = function (title, msg) {
   this.showLoading(false);
   this.errorBox.hidden = false;
-  this.errorBox.innerHTML = '<div><b>⚠️ ' + escapeHtml(title) + '</b>' + msg + '</div>';
+  this.errorBox.innerHTML = '<div><b>' + svgIcon('alert') + ' ' + escapeHtml(title) + '</b>' + msg + '</div>';
   this.controls.style.display = 'none';
   this.center.style.display = 'none';
 };
@@ -271,23 +272,24 @@ AyaPlayer.prototype.toYoutubeMode = function (ytId, title) {
 /* ============ بناء صفحة الدرس ============ */
 function initLessonPage() {
   requireAuth();
+  hydrateIcons();
   var data = loadData();
 
   var lesson = getLesson(data, param('lesson'));
   if (!lesson) { location.replace('home.html'); return; }
 
   var path = lessonPath(data, lesson.id);
-  var subject = path.subject || { name: 'مادة', color: '', icon: '📘' };
+  var subject = path.subject || { name: 'مادة', color: '', icon: 'book' };
   var unit = path.unit || { title: 'وحدة' };
 
   /* مسار التنقل + العنوان */
   $('#crumbs').innerHTML = breadcrumb([
-    { label: '🏠 الرئيسية', href: 'home.html' },
+    { label: 'الرئيسية', href: 'home.html', icon: 'home' },
     { label: subject.name, href: 'subject.html?subject=' + encodeURIComponent(subject.id) },
     { label: unit.title, href: 'unit.html?unit=' + encodeURIComponent(unit.id) },
     { label: lesson.title }
   ]);
-  $('#lessonTitle').innerHTML = iconHTML(subject.icon, '🎬') + ' ' + escapeHtml(lesson.title);
+  $('#lessonTitle').innerHTML = iconHTML(subject.icon, 'film') + ' ' + escapeHtml(lesson.title);
 
   var player = new AyaPlayer($('#playerShell'));
 
@@ -314,7 +316,7 @@ function initLessonPage() {
   } else {
     $('#playerShell').innerHTML =
       '<div class="player"><div class="player-error" style="position:relative;display:grid">' +
-      '<div>🎬 لا توجد فيديوهات في هذا الدرس بعد</div>' +
+      '<div>' + svgIcon('film') + ' لا توجد فيديوهات في هذا الدرس بعد</div>' +
       '</div></div>';
   }
 
@@ -328,12 +330,12 @@ function initLessonPage() {
         var card = document.createElement('div');
         card.className = 'pdf-card';
         card.innerHTML =
-          '<div class="pdf-ico">📄</div>' +
+          '<div class="pdf-ico">' + svgIcon('file') + '</div>' +
           '<div><div class="t">' + escapeHtml(p.title || 'ملف PDF') + '</div>' +
           '<div class="m">' + escapeHtml(res.fileName || 'ملف') + '</div></div>' +
           '<div class="acts">' +
-            '<a class="btn btn-sm" target="_blank" rel="noopener" href="' + escapeHtml(res.src) + '">👁️ عرض</a>' +
-            '<a class="btn btn-sm" download="' + escapeHtml(res.fileName || 'file.pdf') + '" href="' + escapeHtml(res.src) + '">⬇️</a>' +
+            '<a class="btn btn-sm" target="_blank" rel="noopener" href="' + escapeHtml(res.src) + '">' + svgIcon('eye') + ' عرض</a>' +
+            '<a class="btn btn-sm" download="' + escapeHtml(res.fileName || 'file.pdf') + '" href="' + escapeHtml(res.src) + '" title="تنزيل">' + svgIcon('download') + '</a>' +
           '</div>';
         pdfEl.appendChild(card);
       });
@@ -364,8 +366,9 @@ function initLessonPage() {
         im.onerror = function () {
           im.style.display = 'none';
           thumb.style.background = 'linear-gradient(135deg, #7c5cff33, #f5c54222)';
-          thumb.style.display = 'grid'; thumb.style.placeItems = 'center'; thumb.style.fontSize = '30px';
-          thumb.insertBefore(document.createTextNode('🖼️'), thumb.firstChild);
+          thumb.style.display = 'grid'; thumb.style.placeItems = 'center';
+          thumb.insertAdjacentHTML('afterbegin', svgIcon('image'));
+          thumb.querySelector('.ic').style.cssText = 'width:34px;height:34px;opacity:.55';
         };
         im.src = res.src;
         thumb.addEventListener('click', function () { openLightbox(idx); });
@@ -410,7 +413,7 @@ function initLessonPage() {
       var type = ex.exerciseType || 'link';
       var btn = document.createElement('button');
       btn.className = 'ex-btn';
-      var ico = type === 'video' ? '🎬' : (type === 'pdf' ? '📄' : '🔗');
+      var ico = svgIcon(type === 'video' ? 'film' : (type === 'pdf' ? 'file' : 'link'));
       var kindLbl = type === 'video' ? 'فيديو' : (type === 'pdf' ? 'PDF' : 'رابط');
       btn.innerHTML = '<span>' + ico + '</span> ' + escapeHtml(ex.title || 'تمرين') + ' <span class="k">(' + kindLbl + ')</span>';
       btn.addEventListener('click', function () {
@@ -421,7 +424,7 @@ function initLessonPage() {
           $('#playerShell').scrollIntoView({ behavior: 'smooth', block: 'start' });
         } else {
           resolveSrc(ex.url).then(function (res) {
-            if (res.kind === 'error') { toast('⚠️ ' + res.message, 'err'); return; }
+            if (res.kind === 'error') { toast(res.message, 'err'); return; }
             if (res.kind === 'youtube') { window.open('https://www.youtube.com/watch?v=' + res.id, '_blank'); return; }
             window.open(res.src, '_blank');
           });

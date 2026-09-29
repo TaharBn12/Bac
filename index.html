@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>آية باك 2027 — تسجيل الدخول</title>
   <meta name="description" content="آية باك 2027 — منصة تعليمية لطلاب شهادة البكالوريا في الجزائر">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23f5c542'/%3E%3Cpath d='M50 24 12 42l38 18 38-18z' fill='%231a1440'/%3E%3Cpath d='M26 52v16c0 7 10.7 12 24 12s24-5 24-12V52l-14 6.6V66c0 3-4.5 5.5-10 5.5s-10-2.5-10-5.5v-7.4z' fill='%231a1440'/%3E%3Cpath d='M88 42v18' stroke='%231a1440' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
@@ -19,18 +19,18 @@
   <main>
     <div class="auth-card" id="authCard">
       <div class="logo">
-        <span class="logo-icon">🎓</span>
+        <span class="logo-icon"><i data-icon="cap"></i></span>
         <span class="logo-text">آية <b>باك</b></span>
         <span class="logo-year">2027</span>
       </div>
-      <p class="tagline">منصتك للتفوق في شهادة البكالوريا 🇩🇿<br>دروس، فيديوهات، ملخصات وتمارين</p>
+      <p class="tagline">منصتك للتفوق في شهادة البكالوريا <i data-icon="dz"></i><br>دروس، فيديوهات، ملخصات وتمارين</p>
 
       <form id="loginForm" novalidate>
         <label class="field">
-          <span>🔑 كلمة السر</span>
+          <span><i data-icon="key"></i> كلمة السر</span>
           <div class="pw-wrap">
             <input type="password" id="pw" autocomplete="current-password" placeholder="••••••••" required>
-            <button type="button" class="pw-toggle" id="togglePw" aria-label="إظهار / إخفاء كلمة السر">👁️</button>
+            <button type="button" class="pw-toggle" id="togglePw" aria-label="إظهار / إخفاء كلمة السر"><i data-icon="eye"></i></button>
           </div>
         </label>
 
@@ -39,15 +39,16 @@
           تذكرني على هذا الجهاز
         </label>
 
-        <p class="error-msg" id="err" hidden>❌ كلمة السر غير صحيحة، حاول مرة أخرى</p>
+        <p class="error-msg" id="err" hidden><i data-icon="x-circle"></i> كلمة السر غير صحيحة، حاول مرة أخرى</p>
 
-        <button class="btn btn-primary btn-block" type="submit" id="loginBtn">🔓 دخول</button>
+        <button class="btn btn-primary btn-block" type="submit" id="loginBtn"><i data-icon="unlock"></i> دخول</button>
       </form>
     </div>
-    <p class="auth-foot">© 2027 آية باك — صُنع بحب لطلاب الجزائر 💜</p>
+    <p class="auth-foot">© 2027 آية باك — صُنع بحب لطلاب الجزائر <i data-icon="heart"></i></p>
   </main>
 
   <script src="js/data.js"></script>
+  <script src="js/icons.js"></script>
   <script src="js/supabase-config.js"></script>
   <script src="js/app.js"></script>
   <script src="js/cloud.js"></script>
@@ -57,13 +58,14 @@
     if (isAuthed()) location.replace('home.html');
 
     var card = $('#authCard');
+    hydrateIcons();
     var pwInput = $('#pw');
     var errBox = $('#err');
 
     /* إظهار / إخفاء كلمة السر */
     $('#togglePw').addEventListener('click', function () {
       pwInput.type = pwInput.type === 'password' ? 'text' : 'password';
-      this.textContent = pwInput.type === 'password' ? '👁️' : '🙈';
+      this.innerHTML = pwInput.type === 'password' ? svgIcon('eye') : svgIcon('eye-off');
       pwInput.focus();
     });
 
@@ -74,7 +76,7 @@
       var ok = doLogin(pwInput.value, $('#remember').checked);
       if (ok) {
         var btn = $('#loginBtn');
-        btn.textContent = '✅ تم الدخول، جارٍ التحويل...';
+        btn.innerHTML = svgIcon('check') + ' تم الدخول، جارٍ التحويل...';
         btn.disabled = true;
         setTimeout(function () { location.href = 'home.html'; }, 700);
       } else {

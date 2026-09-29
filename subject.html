@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>آية باك 2027 — الوحدات</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23f5c542'/%3E%3Cpath d='M50 24 12 42l38 18 38-18z' fill='%231a1440'/%3E%3Cpath d='M26 52v16c0 7 10.7 12 24 12s24-5 24-12V52l-14 6.6V66c0 3-4.5 5.5-10 5.5s-10-2.5-10-5.5v-7.4z' fill='%231a1440'/%3E%3Cpath d='M88 42v18' stroke='%231a1440' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
@@ -15,12 +15,12 @@
   <header class="topbar">
     <div class="topbar-inner">
       <a class="logo" href="home.html">
-        <span class="logo-icon">🎓</span>
+        <span class="logo-icon"><i data-icon="cap"></i></span>
         <span class="logo-text">آية <b>باك</b></span>
         <span class="logo-year">2027</span>
       </a>
       <div class="top-actions">
-        <button class="btn btn-sm btn-danger" id="logoutBtn">🚪 خروج</button>
+        <button class="btn btn-sm btn-danger" id="logoutBtn"><i data-icon="logout"></i> خروج</button>
       </div>
     </div>
   </header>
@@ -31,10 +31,11 @@
     <div class="list" id="unitsList"></div>
   </main>
 
-  <footer class="footer">آية باك 2027 🇩🇿</footer>
+  <footer class="footer">آية باك 2027 <i data-icon="dz"></i></footer>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/data.js"></script>
+  <script src="js/icons.js"></script>
   <script src="js/supabase-config.js"></script>
   <script src="js/app.js"></script>
   <script src="js/cloud.js"></script>
@@ -42,6 +43,7 @@
     'use strict';
     (function () {
       requireAuth();
+      hydrateIcons();
       initData().then(function () {
       var data = loadData();
 
@@ -50,14 +52,14 @@
 
       /* مسار التنقل */
       $('#crumbs').innerHTML = breadcrumb([
-        { label: '🏠 الرئيسية', href: 'home.html' },
+        { label: 'الرئيسية', href: 'home.html', icon: 'home' },
         { label: subject.name }
       ]);
 
       /* الترويسة */
       $('#head').innerHTML =
         '<div class="page-head ' + (subject.color ? 'c-' + subject.color : '') + '">' +
-          '<div class="icon">' + iconHTML(subject.icon, '📘') + '</div>' +
+          '<div class="icon">' + iconHTML(subject.icon, 'book') + '</div>' +
           '<div><h1>' + escapeHtml(subject.name) + '</h1>' +
           '<div class="meta">اختر الوحدة التعليمية لعرض دروسها</div></div>' +
         '</div>';

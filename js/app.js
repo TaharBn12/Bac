@@ -26,7 +26,7 @@ function escapeHtml(v) {
 function param(name) { return new URLSearchParams(location.search).get(name); }
 function byOrder(a, b) { return (a.order || 0) - (b.order || 0); }
 
-/* ============ أيقونات المواد (صورة عبر رابط أو إيموجي) ============ */
+/* ============ أيقونات المواد (SVG / صورة عبر رابط / إيموجي قديم) ============ */
 /* هل القيمة رابط صورة؟ (http/https أو data: أو ملف مرفوع sb:) */
 function isImageIcon(v) {
   v = String(v == null ? '' : v).trim();
@@ -44,16 +44,28 @@ function iconSrc(v) {
   return v;
 }
 
-/* HTML الأيقونة: صورة إن كان الرابط صالحاً، وإلا إيموجي/نص */
-function iconHTML(v, fallbackEmoji) {
+/* HTML الأيقونة: SVG بالاسم، أو صورة عبر رابط، أو نص (إيموجي قديم يُحوَّل تلقائياً إلى SVG) */
+function iconHTML(v, fallbackName) {
   v = String(v == null ? '' : v).trim();
-  var fb = fallbackEmoji || '📘';
-  if (!v) return escapeHtml(fb);
+  var fb = fallbackName || 'book';
+  if (!v) return svgIcon(fb);
   if (isImageIcon(v)) {
-    return '<img class="icon-img" src="' + escapeHtml(iconSrc(v)) + '" alt="' + escapeHtml(fb) +
-      '" loading="lazy" onerror="this.onerror=null;this.outerHTML=\'' + fb + '\'">';
+    return '<img class="icon-img" src="' + escapeHtml(iconSrc(v)) + '" alt="" loading="lazy" onerror="this.onerror=null;this.remove()">';
   }
-  return escapeHtml(v);
+  var name = null;
+  if (window.ICONS && window.ICONS[v]) name = v;                       /* اسم أيقونة */
+  else if (window.EMOJI_ICON_MAP && window.EMOJI_ICON_MAP[v]) name = window.EMOJI_ICON_MAP[v]; /* إيموجي قديم */
+  if (name) return svgIcon(name);
+  return escapeHtml(v); /* نص حر */
+}
+
+/* استبدال عناصر <i data-icon="الاسم"></i> في HTML الثابت بأيقونات SVG */
+function hydrateIcons(root) {
+  $all('[data-icon]', root || document).forEach(function (el) {
+    var svg = svgIcon(el.getAttribute('data-icon'));
+    if (svg) el.outerHTML = svg;
+    else el.remove();
+  });
 }
 
 function fmtSize(bytes) {
@@ -74,9 +86,11 @@ function fmtTime(s) {
 
 function toast(msg, type) {
   type = type || 'ok';
+  var iconName = type === 'err' ? 'x-circle' : (type === 'info' ? 'info' : 'check-circle');
   var t = document.createElement('div');
   t.className = 'toast toast-' + type;
-  t.textContent = msg;
+  t.innerHTML = svgIcon(iconName) + '<span class="toast-msg"></span>';
+  $('.toast-msg', t).textContent = msg;
   document.body.appendChild(t);
   requestAnimationFrame(function () { t.classList.add('show'); });
   setTimeout(function () {
@@ -87,9 +101,10 @@ function toast(msg, type) {
 
 function breadcrumb(items) {
   return '<nav class="crumbs">' + items.map(function (it) {
+    var label = it.icon ? svgIcon(it.icon) + ' ' + escapeHtml(it.label) : escapeHtml(it.label);
     return it.href
-      ? '<a href="' + it.href + '">' + escapeHtml(it.label) + '</a>'
-      : '<span>' + escapeHtml(it.label) + '</span>';
+      ? '<a href="' + it.href + '">' + label + '</a>'
+      : '<span>' + label + '</span>';
   }).join('<span class="sep">/</span>') + '</nav>';
 }
 

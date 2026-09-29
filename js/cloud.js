@@ -159,7 +159,7 @@ Cloud._sync = function (data) {
   }).catch(function (e) {
     self.lastError = e;
     console.error('Supabase sync:', e);
-    toast('⚠️ تعذّرت المزامنة مع السحابة — سيُعاد المحاولة عند الحفظ القادم', 'err');
+    toast('تعذّرت المزامنة مع السحابة — سيُعاد المحاولة عند الحفظ القادم', 'err');
   });
 };
 
@@ -188,7 +188,7 @@ Cloud.uploadFile = function (file) {
     .slice(-70) || 'file';
   var path = SUPABASE_UPLOAD_FOLDER + '/' + uid('f') + '-' + safe;
 
-  toast('⬆️ جارٍ رفع الملف إلى السحابة...');
+  toast('جارٍ رفع الملف إلى السحابة...', 'info');
 
   return c.storage.from(SUPABASE_BUCKET).upload(path, file, {
     contentType: file.type || 'application/octet-stream'
@@ -211,7 +211,7 @@ Cloud.removeFile = function (path) {
 };
 
 /* ============ التحويل بين صيغة التطبيق وصيغة قاعدة البيانات ============ */
-function subjectToRow(s)  { return { id: s.id, name: s.name, icon: s.icon || '📘', color: s.color || 'indigo', sort_order: s.order || 0 }; }
+function subjectToRow(s)  { return { id: s.id, name: s.name, icon: s.icon || 'book', color: s.color || 'indigo', sort_order: s.order || 0 }; }
 function unitToRow(u)     { return { id: u.id, subject_id: u.subjectId, title: u.title, sort_order: u.order || 0 }; }
 function lessonToRow(l)   { return { id: l.id, unit_id: l.unitId, title: l.title, sort_order: l.order || 0 }; }
 function resourceToRow(r) {

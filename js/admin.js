@@ -5,10 +5,10 @@
 
 var SUBJECT_COLORS = ['indigo', 'teal', 'green', 'amber', 'purple', 'blue', 'sky', 'rose', 'emerald'];
 var KIND_META = {
-  video:    { icon: '🎬', label: 'فيديو' },
-  pdf:      { icon: '📄', label: 'ملف PDF' },
-  image:    { icon: '🖼️', label: 'صورة' },
-  exercise: { icon: '✏️', label: 'تمرين' }
+  video:    { icon: 'film', label: 'فيديو' },
+  pdf:      { icon: 'file', label: 'ملف PDF' },
+  image:    { icon: 'image', label: 'صورة' },
+  exercise: { icon: 'pencil', label: 'تمرين' }
 };
 
 var data, currentTab = 'subjects';
@@ -17,6 +17,7 @@ var pickedFiles = {}; /* ملفات مختارة مؤقتاً في نماذج ا
 
 function initAdmin() {
   requireAuth();
+  hydrateIcons();
 
   if (!isAdminUnlocked()) {
     $('#adminGate').hidden = false;
@@ -30,7 +31,7 @@ function bindGate() {
   $('#gateToggle').addEventListener('click', function () {
     var i = $('#gatePw');
     i.type = i.type === 'password' ? 'text' : 'password';
-    this.textContent = i.type === 'password' ? '👁️' : '🙈';
+    this.innerHTML = i.type === 'password' ? svgIcon('eye') : svgIcon('eye-off');
   });
   $('#gateForm').addEventListener('submit', function (e) {
     e.preventDefault();
@@ -60,7 +61,7 @@ function showApp() {
     if (isCloudMode() && Cloud.isEmpty(data)) {
       data = JSON.parse(JSON.stringify(window.DEFAULT_DATA));
       saveData(data);
-      toast('🌱 تمت تهيئة المحتوى الأولي في السحابة');
+      toast('تمت تهيئة المحتوى الأولي في السحابة');
     }
 
     updateCloudBadge();
@@ -102,13 +103,13 @@ function updateCloudBadge() {
   var el = $('#cloudStatus');
   if (!el) return;
   if (isCloudMode()) {
-    el.textContent = '☁️ متصل بالسحابة';
+    el.innerHTML = svgIcon('cloud') + ' متصل بالسحابة';
     el.className = 'cloud-badge ok';
   } else if (typeof Cloud !== 'undefined' && Cloud.setupMissing) {
-    el.textContent = '⚠️ أكمل ربط Supabase';
+    el.innerHTML = svgIcon('alert') + ' أكمل ربط Supabase';
     el.className = 'cloud-badge warn';
   } else {
-    el.textContent = '💾 وضع محلي';
+    el.innerHTML = svgIcon('cloud-off') + ' وضع محلي';
     el.className = 'cloud-badge off';
   }
 }
@@ -117,15 +118,15 @@ function updateCloudBadge() {
 function cloudBannerHTML() {
   if (isCloudMode()) return '';
   if (typeof Cloud !== 'undefined' && Cloud.setupMissing) {
-    return '<div class="cloud-banner">⚠️ <b>لم تُنشأ جداول Supabase بعد.</b><br>' +
+    return '<div class="cloud-banner">' + svgIcon('alert') + ' <b>لم تُنشأ جداول Supabase بعد.</b><br>' +
       'خطوات الربط (مرة واحدة فقط):<br>' +
-      '1️⃣ افتح مشروعك في <code>supabase.com/dashboard</code><br>' +
-      '2️⃣ من القائمة الجانبية اختر <b>SQL Editor</b><br>' +
-      '3️⃣ انسخ محتوى ملف <code>supabase-setup.sql</code> (الموجود مع ملفات الموقع) والصقه ثم اضغط <b>Run</b><br>' +
-      '4️⃣ أعد فتح لوحة التحكم — ستتحول الشارة إلى «☁️ متصل بالسحابة» ✅<br>' +
+      '<b>1)</b> افتح مشروعك في <code>supabase.com/dashboard</code><br>' +
+      '<b>2)</b> من القائمة الجانبية اختر <b>SQL Editor</b><br>' +
+      '<b>3)</b> انسخ محتوى ملف <code>supabase-setup.sql</code> (الموجود مع ملفات الموقع) والصقه ثم اضغط <b>Run</b><br>' +
+      '<b>4)</b> أعد فتح لوحة التحكم — ستتحول الشارة إلى «' + svgIcon('cloud') + ' متصل بالسحابة» ' + svgIcon('check') + '<br>' +
       '<span style="opacity:.8">حتى ذلك الحين يعمل الموقع بالوضع المحلي: المحتوى يُحفظ على هذا الجهاز فقط.</span></div>';
   }
-  return '<div class="cloud-banner">💾 <b>الوضع المحلي:</b> تعذّر الوصول إلى Supabase الآن، لذا يُحفظ المحتوى على هذا الجهاز فقط. ' +
+  return '<div class="cloud-banner">' + svgIcon('cloud-off') + ' <b>الوضع المحلي:</b> تعذّر الوصول إلى Supabase الآن، لذا يُحفظ المحتوى على هذا الجهاز فقط. ' +
     'عند عودة الاتصال وتسجيل الدخول من جديد ستُزامَن التعديلات تلقائياً.</div>';
 }
 
@@ -179,8 +180,7 @@ function deleteCascade(where, id) {
 
 function subjectOptions(selectedId) {
   return '<option value="">— اختر المادة —</option>' + data.subjects.slice().sort(byOrder).map(function (s) {
-    var ico = isImageIcon(s.icon) ? '🖼️' : (s.icon || '📘');
-    return '<option value="' + s.id + '"' + (s.id === selectedId ? ' selected' : '') + '>' + escapeHtml(ico + ' ' + s.name) + '</option>';
+    return '<option value="' + s.id + '"' + (s.id === selectedId ? ' selected' : '') + '>' + escapeHtml(s.name) + '</option>';
   }).join('');
 }
 function unitOptions(subjectId, selectedId) {
@@ -199,10 +199,10 @@ function lessonOptions(unitId, selectedId) {
 function actsHTML(id, extra) {
   return '<div class="item-acts">' +
     (extra || '') +
-    '<button class="icon-btn" data-act="up" data-id="' + id + '" title="تحريك للأعلى">⬆</button>' +
-    '<button class="icon-btn" data-act="down" data-id="' + id + '" title="تحريك للأسفل">⬇</button>' +
-    '<button class="icon-btn" data-act="rename" data-id="' + id + '" title="تعديل الاسم">✎</button>' +
-    '<button class="icon-btn danger" data-act="del" data-id="' + id + '" title="حذف">🗑</button>' +
+    '<button class="icon-btn" data-act="up" data-id="' + id + '" title="تحريك للأعلى">' + svgIcon('chevron-up') + '</button>' +
+    '<button class="icon-btn" data-act="down" data-id="' + id + '" title="تحريك للأسفل">' + svgIcon('chevron-down') + '</button>' +
+    '<button class="icon-btn" data-act="rename" data-id="' + id + '" title="تعديل الاسم">' + svgIcon('pencil') + '</button>' +
+    '<button class="icon-btn danger" data-act="del" data-id="' + id + '" title="حذف">' + svgIcon('trash') + '</button>' +
   '</div>';
 }
 
@@ -223,7 +223,7 @@ function bindList(container, handlers) {
 }
 
 function fileLabelHTML(key, accept) {
-  return '<label class="btn file-label">📁 رفع من الجهاز' +
+  return '<label class="btn file-label">' + svgIcon('upload') + ' رفع من الجهاز' +
     '<input type="file" accept="' + accept + '" data-pick="' + key + '"></label>' +
     '<span class="file-picked" data-picked="' + key + '"></span>';
 }
@@ -234,8 +234,8 @@ function bindFilePickers(root) {
       var key = inp.dataset.pick;
       pickedFiles[key] = inp.files[0] || null;
       var lbl = $('[data-picked="' + key + '"]', root);
-      if (lbl) lbl.textContent = pickedFiles[key]
-        ? '✔ ' + pickedFiles[key].name + ' (' + fmtSize(pickedFiles[key].size) + ')'
+      if (lbl) lbl.innerHTML = pickedFiles[key]
+        ? svgIcon('check') + ' ' + escapeHtml(pickedFiles[key].name) + ' (' + fmtSize(pickedFiles[key].size) + ')'
         : '';
       /* نملأ العنوان تلقائياً باسم الملف إن كان فارغاً */
       var titleInp = $('input[data-title="' + key + '"]', root);
@@ -266,43 +266,43 @@ function renderSubjectsPanel(p) {
   var list = data.subjects.slice().sort(byOrder);
 
   p.innerHTML =
-    '<h2>📚 إدارة المواد</h2>' +
-    '<p class="hint">أضف مواد جديدة — الأيقونة تكون <b>صورة عبر رابط</b> (أو إيموجي إن أردت)، ويمكنك تغيير أيقونة أي مادة بزر 🖼️.</p>' +
+    '<h2>' + svgIcon('book') + ' إدارة المواد</h2>' +
+    '<p class="hint">أضف مواد جديدة — الأيقونة تكون <b>صورة عبر رابط</b> أو <b>اسم أيقونة SVG</b>، ويمكنك تغيير أيقونة أي مادة بزر الصورة.</p>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<input class="inp" id="nsName" placeholder="اسم المادة (مثال: الرياضيات)">' +
         '<input class="inp" id="nsIcon" dir="ltr" placeholder="رابط صورة الأيقونة https://... (أو إيموجي)" style="flex:2 1 240px">' +
-        '<div class="icon-preview" id="nsIconPreview">📘</div>' +
+        '<div class="icon-preview" id="nsIconPreview">' + svgIcon('book') + '</div>' +
         '<select class="inp" id="nsColor">' + SUBJECT_COLORS.map(function (c) { return '<option>' + c + '</option>'; }).join('') + '</select>' +
-        '<button class="btn btn-primary" id="nsAdd">➕ إضافة مادة</button>' +
+        '<button class="btn btn-primary" id="nsAdd">' + svgIcon('plus') + ' إضافة مادة</button>' +
       '</div>' +
     '</div>' +
     '<div class="admin-list" id="subjList">' +
       (list.length ? list.map(function (s) {
         var units = unitsOf(data, s.id);
         return '<div class="item-row c-' + (s.color || 'indigo') + '">' +
-          '<div class="item-ico">' + iconHTML(s.icon, '📘') + '</div>' +
+          '<div class="item-ico">' + iconHTML(s.icon, 'book') + '</div>' +
           '<div class="item-info"><div class="item-title">' + escapeHtml(s.name) + '</div>' +
           '<div class="item-sub">' + units.length + ' وحدة · ' + units.reduce(function (n, u) { return n + lessonsOf(data, u.id).length; }, 0) + ' درس</div></div>' +
-          actsHTML(s.id, '<button class="icon-btn" data-act="editicon" data-id="' + s.id + '" title="تغيير الأيقونة (رابط صورة أو إيموجي)">🖼️</button>') +
+          actsHTML(s.id, '<button class="icon-btn" data-act="editicon" data-id="' + s.id + '" title="تغيير الأيقونة (رابط صورة أو اسم أيقونة)">' + svgIcon('image') + '</button>') +
         '</div>';
-      }).join('') : '<div class="empty">لا توجد مواد — أضف أول مادة أعلاه ☝️</div>') +
+      }).join('') : '<div class="empty">لا توجد مواد — أضف أول مادة أعلاه</div>') +
     '</div>';
 
   /* معاينة مباشرة للأيقونة أثناء الكتابة */
   $('#nsIcon').addEventListener('input', function () {
-    $('#nsIconPreview').innerHTML = iconHTML(this.value, '📘');
+    $('#nsIconPreview').innerHTML = iconHTML(this.value, 'book');
   });
 
   $('#nsAdd').addEventListener('click', function () {
     var name = $('#nsName').value.trim();
-    if (!name) { toast('⚠️ اكتب اسم المادة', 'err'); return; }
+    if (!name) { toast('اكتب اسم المادة', 'err'); return; }
     data.subjects.push({
       id: uid('s'), name: name,
-      icon: $('#nsIcon').value.trim() || '📘', color: $('#nsColor').value,
+      icon: $('#nsIcon').value.trim() || 'book', color: $('#nsColor').value,
       order: (data.subjects.reduce(function (m, s) { return Math.max(m, s.order || 0); }, 0) + 1)
     });
-    save(); renderPanel(); toast('✅ تمت إضافة المادة');
+    save(); renderPanel(); toast('تمت إضافة المادة');
   });
 
   bindList($('#subjList'), {
@@ -315,17 +315,17 @@ function renderSubjectsPanel(p) {
     },
     editicon: function (id) {
       var s = getSubject(data, id);
-      var v = prompt('أيقونة المادة "' + s.name + '"\nالصق رابط الصورة (أو اكتب إيموجي):', s.icon || '');
+      var v = prompt('أيقونة المادة "' + s.name + '"\nالصق رابط الصورة أو اسم أيقونة SVG (مثال: math، atom، book):', s.icon || '');
       if (v === null) return; /* أُلغي */
-      s.icon = v.trim() || '📘';
-      save(); renderPanel(); toast('✅ تم تحديث الأيقونة');
+      s.icon = v.trim() || 'book';
+      save(); renderPanel(); toast('تم تحديث الأيقونة');
     },
     del: function (id) {
       var s = getSubject(data, id);
       if (confirm('حذف مادة "' + s.name + '" مع كل وحداتها ودروسها ومحتواها؟')) {
         deleteCascade('subject', id);
         if (sel.subject === id) sel.subject = '';
-        renderPanel(); toast('🗑️ تم الحذف');
+        renderPanel(); toast('تم الحذف', 'info');
       }
     }
   });
@@ -337,13 +337,13 @@ function renderUnitsPanel(p) {
   var list = sel.subject ? unitsOf(data, sel.subject) : [];
 
   p.innerHTML =
-    '<h2>📑 إدارة الوحدات</h2>' +
+    '<h2>' + svgIcon('layers') + ' إدارة الوحدات</h2>' +
     '<p class="hint">اختر المادة ثم أضف وحداتها التعليمية.</p>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<select class="inp" id="uSubject">' + subjectOptions(sel.subject) + '</select>' +
         '<input class="inp" id="uTitle" placeholder="عنوان الوحدة (مثال: النهايات والاتصال)">' +
-        '<button class="btn btn-primary" id="uAdd">➕ إضافة وحدة</button>' +
+        '<button class="btn btn-primary" id="uAdd">' + svgIcon('plus') + ' إضافة وحدة</button>' +
       '</div>' +
     '</div>' +
     '<div class="admin-list" id="unitList">' +
@@ -355,20 +355,20 @@ function renderUnitsPanel(p) {
           '<div class="item-sub">' + ls.length + ' درس</div></div>' +
           actsHTML(u.id) +
         '</div>';
-      }).join('') : '<div class="empty">لا توجد وحدات في هذه المادة — أضف وحدة أعلاه ☝️</div>') +
+      }).join('') : '<div class="empty">لا توجد وحدات في هذه المادة — أضف وحدة أعلاه</div>') +
     '</div>';
 
   $('#uSubject').addEventListener('change', function () { sel.subject = this.value; sel.unit = ''; sel.lesson = ''; renderPanel(); });
 
   $('#uAdd').addEventListener('click', function () {
-    if (!sel.subject) { toast('⚠️ اختر المادة أولاً', 'err'); return; }
+    if (!sel.subject) { toast('اختر المادة أولاً', 'err'); return; }
     var t = $('#uTitle').value.trim();
-    if (!t) { toast('⚠️ اكتب عنوان الوحدة', 'err'); return; }
+    if (!t) { toast('اكتب عنوان الوحدة', 'err'); return; }
     data.units.push({
       id: uid('u'), subjectId: sel.subject, title: t,
       order: (unitsOf(data, sel.subject).reduce(function (m, u) { return Math.max(m, u.order || 0); }, 0) + 1)
     });
-    save(); renderPanel(); toast('✅ تمت إضافة الوحدة');
+    save(); renderPanel(); toast('تمت إضافة الوحدة');
   });
 
   bindList($('#unitList'), {
@@ -383,7 +383,7 @@ function renderUnitsPanel(p) {
       var u = getUnit(data, id);
       if (confirm('حذف وحدة "' + u.title + '" مع كل دروسها ومحتواها؟')) {
         deleteCascade('unit', id);
-        renderPanel(); toast('🗑️ تم الحذف');
+        renderPanel(); toast('تم الحذف', 'info');
       }
     }
   });
@@ -396,14 +396,14 @@ function renderLessonsPanel(p) {
   var list = sel.unit ? lessonsOf(data, sel.unit) : [];
 
   p.innerHTML =
-    '<h2>🎬 إدارة الدروس</h2>' +
+    '<h2>' + svgIcon('film') + ' إدارة الدروس</h2>' +
     '<p class="hint">اختر المادة ثم الوحدة وأضف الدروس.</p>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<select class="inp" id="lSubject">' + subjectOptions(sel.subject) + '</select>' +
         '<select class="inp" id="lUnit">' + unitOptions(sel.subject, sel.unit) + '</select>' +
         '<input class="inp" id="lTitle" placeholder="عنوان الدرس (مثال: نهاية دالة عند نقطة)">' +
-        '<button class="btn btn-primary" id="lAdd">➕ إضافة درس</button>' +
+        '<button class="btn btn-primary" id="lAdd">' + svgIcon('plus') + ' إضافة درس</button>' +
       '</div>' +
     '</div>' +
     '<div class="admin-list" id="lessonList">' +
@@ -413,10 +413,10 @@ function renderLessonsPanel(p) {
           '<div class="item-ico">' + (i + 1) + '</div>' +
           '<div class="item-info"><div class="item-title">' + escapeHtml(l.title) + '</div>' +
           '<div class="item-sub">' + res.length + ' عنصر محتوى</div></div>' +
-          actsHTML(l.id, '<button class="icon-btn" data-act="goto" data-id="' + l.id + '" title="إدارة المحتوى">➕</button>' +
-                         '<button class="icon-btn" data-act="view" data-id="' + l.id + '" title="معاينة الدرس">👁</button>') +
+          actsHTML(l.id, '<button class="icon-btn" data-act="goto" data-id="' + l.id + '" title="إدارة المحتوى">' + svgIcon('plus') + '</button>' +
+                         '<button class="icon-btn" data-act="view" data-id="' + l.id + '" title="معاينة الدرس">' + svgIcon('eye') + '</button>') +
         '</div>';
-      }).join('') : '<div class="empty">لا توجد دروس في هذه الوحدة — أضف درساً أعلاه ☝️</div>') +
+      }).join('') : '<div class="empty">لا توجد دروس في هذه الوحدة — أضف درساً أعلاه</div>') +
     '</div>';
 
   $('#lSubject').addEventListener('change', function () {
@@ -428,14 +428,14 @@ function renderLessonsPanel(p) {
   $('#lUnit').addEventListener('change', function () { sel.unit = this.value; sel.lesson = ''; renderPanel(); });
 
   $('#lAdd').addEventListener('click', function () {
-    if (!sel.unit) { toast('⚠️ اختر الوحدة أولاً', 'err'); return; }
+    if (!sel.unit) { toast('اختر الوحدة أولاً', 'err'); return; }
     var t = $('#lTitle').value.trim();
-    if (!t) { toast('⚠️ اكتب عنوان الدرس', 'err'); return; }
+    if (!t) { toast('اكتب عنوان الدرس', 'err'); return; }
     data.lessons.push({
       id: uid('l'), unitId: sel.unit, title: t,
       order: (lessonsOf(data, sel.unit).reduce(function (m, l) { return Math.max(m, l.order || 0); }, 0) + 1)
     });
-    save(); renderPanel(); toast('✅ تمت إضافة الدرس');
+    save(); renderPanel(); toast('تمت إضافة الدرس');
   });
 
   bindList($('#lessonList'), {
@@ -450,7 +450,7 @@ function renderLessonsPanel(p) {
       var l = getLesson(data, id);
       if (confirm('حذف درس "' + l.title + '" مع كل محتواه (فيديوهات، ملفات، تمارين)؟')) {
         deleteCascade('lesson', id);
-        renderPanel(); toast('🗑️ تم الحذف');
+        renderPanel(); toast('تم الحذف', 'info');
       }
     },
     view: function (id) { window.open('lesson.html?lesson=' + encodeURIComponent(id), '_blank'); },
@@ -472,7 +472,7 @@ function renderContentPanel(p) {
   var lesson = getLesson(data, sel.lesson);
 
   p.innerHTML =
-    '<h2>➕ إضافة المحتوى</h2>' +
+    '<h2>' + svgIcon('plus') + ' إضافة المحتوى</h2>' +
     '<p class="hint">اختر المادة ← الوحدة ← الدرس، ثم أضف الفيديوهات والملفات والتمارين.</p>' +
 
     '<div class="frm-card">' +
@@ -480,7 +480,7 @@ function renderContentPanel(p) {
         '<select class="inp" id="cSubject">' + subjectOptions(sel.subject) + '</select>' +
         '<select class="inp" id="cUnit">' + unitOptions(sel.subject, sel.unit) + '</select>' +
         '<select class="inp" id="cLesson">' + lessonOptions(sel.unit, sel.lesson) + '</select>' +
-        '<a class="btn" href="lesson.html?lesson=' + encodeURIComponent(sel.lesson) + '" target="_blank">👁️ معاينة الدرس</a>' +
+        '<a class="btn" href="lesson.html?lesson=' + encodeURIComponent(sel.lesson) + '" target="_blank">' + svgIcon('eye') + ' معاينة الدرس</a>' +
       '</div>' +
     '</div>' +
     '<div id="resArea"></div>';
@@ -499,7 +499,7 @@ function renderContentPanel(p) {
   $('#cLesson').addEventListener('change', function () { sel.lesson = this.value; renderPanel(); });
 
   if (!lesson) {
-    $('#resArea').innerHTML = '<div class="empty">لا توجد دروس — أنشئ درساً أولاً من تبويب «🎬 الدروس»</div>';
+    $('#resArea').innerHTML = '<div class="empty">لا توجد دروس — أنشئ درساً أولاً من تبويب «الدروس»</div>';
     return;
   }
 
@@ -509,9 +509,9 @@ function renderContentPanel(p) {
 function renderResourceSections(area, lesson) {
   pickedFiles = {}; /* تصفير الملفات المختارة عند كل إعادة رسم */
   area.innerHTML =
-    resSectionHTML(lesson, 'video', '🎬 الفيديوهات', 'video/*', 'رابط الفيديو (MP4/WebM/OGG أو رابط يوتيوب)') +
-    resSectionHTML(lesson, 'pdf', '📄 ملفات PDF', 'application/pdf,.pdf', 'رابط ملف PDF (https://...)') +
-    resSectionHTML(lesson, 'image', '🖼️ الصور', 'image/*', 'رابط الصورة (https://...)') +
+    resSectionHTML(lesson, 'video', 'الفيديوهات', 'video/*', 'رابط الفيديو (MP4/WebM/OGG أو رابط يوتيوب)') +
+    resSectionHTML(lesson, 'pdf', 'ملفات PDF', 'application/pdf,.pdf', 'رابط ملف PDF (https://...)') +
+    resSectionHTML(lesson, 'image', 'الصور', 'image/*', 'رابط الصورة (https://...)') +
     exSectionHTML(lesson);
 
   bindFilePickers(area);
@@ -541,7 +541,7 @@ function renderResourceSections(area, lesson) {
         if (confirm('حذف "' + (r.title || KIND_META[r.kind].label) + '"؟')) {
           deleteCascade('resource', id);
           renderResourceSections(area, lesson);
-          toast('🗑️ تم الحذف');
+          toast('تم الحذف', 'info');
         }
       }
     });
@@ -552,14 +552,14 @@ function resSectionHTML(lesson, kind, title, accept, urlPlaceholder) {
   var meta = KIND_META[kind];
   var items = resourcesOf(data, lesson.id, kind);
 
-  return '<h3 class="sub-title">' + meta.icon + ' ' + title +
+  return '<h3 class="sub-title">' + svgIcon(meta.icon) + ' ' + title +
       ' <span class="cnt">' + items.length + '</span></h3>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<input class="inp" data-title="' + kind + '" placeholder="العنوان (مثال: الجزء الأول)">' +
         '<input class="inp" data-url="' + kind + '" dir="ltr" placeholder="' + urlPlaceholder + '">' +
         fileLabelHTML(kind, accept) +
-        '<button class="btn btn-primary" id="add-' + kind + '">➕ إضافة</button>' +
+        '<button class="btn btn-primary" id="add-' + kind + '">' + svgIcon('plus') + ' إضافة</button>' +
       '</div>' +
     '</div>' +
     '<div class="admin-list" id="list-' + kind + '">' +
@@ -570,18 +570,18 @@ function resSectionHTML(lesson, kind, title, accept, urlPlaceholder) {
 
 function exSectionHTML(lesson) {
   var items = resourcesOf(data, lesson.id, 'exercise');
-  return '<h3 class="sub-title">✏️ التمارين <span class="cnt">' + items.length + '</span></h3>' +
+  return '<h3 class="sub-title">' + svgIcon('pencil') + ' التمارين <span class="cnt">' + items.length + '</span></h3>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<input class="inp" data-title="exercise" placeholder="عنوان التمرين (مثال: سلسلة تمارين رقم 1)">' +
         '<select class="inp" id="ex-type">' +
-          '<option value="pdf">📄 تمرين PDF</option>' +
-          '<option value="video">🎬 تمرين فيديو (يُشغَّل في المشغل)</option>' +
-          '<option value="link">🔗 رابط موقع</option>' +
+          '<option value="pdf">تمرين PDF</option>' +
+          '<option value="video">تمرين فيديو (يُشغَّل في المشغل)</option>' +
+          '<option value="link">رابط موقع</option>' +
         '</select>' +
         '<input class="inp" data-url="exercise" dir="ltr" placeholder="الرابط (أو ارفع ملفاً)">' +
         fileLabelHTML('exercise', 'video/*,application/pdf,.pdf') +
-        '<button class="btn btn-primary" id="add-exercise">➕ إضافة</button>' +
+        '<button class="btn btn-primary" id="add-exercise">' + svgIcon('plus') + ' إضافة</button>' +
       '</div>' +
     '</div>' +
     '<div class="admin-list" id="list-exercise">' +
@@ -592,19 +592,20 @@ function exSectionHTML(lesson) {
 
 function resRowHTML(r) {
   var meta = KIND_META[r.kind];
-  var src;
-  if (isIdbUrl(r.url)) src = '📁 ملف مرفوع' + (r.size ? ' (' + fmtSize(r.size) + ')' : '');
-  else if (youtubeId(r.url)) src = '▶ يوتيوب';
-  else src = '🔗 ' + r.url;
+  var src, rtl = false;
+  if (isSbUrl(r.url)) { src = svgIcon('cloud') + ' ملف في السحابة' + (r.size ? ' (' + fmtSize(r.size) + ')' : ''); rtl = true; }
+  else if (isIdbUrl(r.url)) { src = svgIcon('folder') + ' ملف مرفوع' + (r.size ? ' (' + fmtSize(r.size) + ')' : ''); rtl = true; }
+  else if (youtubeId(r.url)) { src = svgIcon('film') + ' يوتيوب'; rtl = true; }
+  else src = svgIcon('link') + ' ' + escapeHtml(r.url);
 
   var typeLbl = r.kind === 'exercise' && r.exerciseType
     ? ' — ' + ({ video: 'فيديو', pdf: 'PDF', link: 'رابط' }[r.exerciseType])
     : '';
 
   return '<div class="item-row">' +
-    '<div class="item-ico">' + meta.icon + '</div>' +
+    '<div class="item-ico">' + svgIcon(meta.icon) + '</div>' +
     '<div class="item-info"><div class="item-title">' + escapeHtml(r.title || meta.label) + typeLbl + '</div>' +
-    '<div class="item-sub">' + escapeHtml(src) + '</div></div>' +
+    '<div class="item-sub"' + (rtl ? ' dir="rtl" style="text-align:right"' : '') + '>' + src + '</div></div>' +
     actsHTML(r.id) +
   '</div>';
 }
@@ -616,7 +617,7 @@ function addResource(area, lesson, kind, exerciseType) {
   var url = urlInp.value.trim();
   var file = pickedFiles[kind] || null;
 
-  if (!file && !url) { toast('⚠️ الصق رابطاً أو اختر ملفاً للرفع', 'err'); return; }
+  if (!file && !url) { toast('الصق رابطاً أو اختر ملفاً للرفع', 'err'); return; }
 
   var maxOrder = resourcesOf(data, lesson.id, kind).reduce(function (m, r) { return Math.max(m, r.order || 0); }, 0);
 
@@ -633,9 +634,9 @@ function addResource(area, lesson, kind, exerciseType) {
       titleInp.value = ''; urlInp.value = '';
       clearPick(kind);
       renderResourceSections(area, lesson);
-      toast('✅ تم رفع الملف وإضافته');
+      toast('تم رفع الملف وإضافته');
     }).catch(function () {
-      toast('⚠️ تعذّر رفع الملف (مساحة غير كافية؟)', 'err');
+      toast('تعذّر رفع الملف (مساحة غير كافية؟)', 'err');
     });
   } else {
     data.resources.push({
@@ -648,7 +649,7 @@ function addResource(area, lesson, kind, exerciseType) {
     save();
     titleInp.value = ''; urlInp.value = '';
     renderResourceSections(area, lesson);
-    toast('✅ تمت الإضافة');
+    toast('تمت الإضافة');
   }
 }
 
@@ -658,17 +659,17 @@ function renderBackupPanel(p) {
   if (isCloudMode()) {
     cloudBox =
       '<div class="frm-card">' +
-        '<h3 class="sub-title" style="margin-top:0">☁️ السحابة (Supabase) — <span style="color:var(--ok)">متصلة</span></h3>' +
+        '<h3 class="sub-title" style="margin-top:0">' + svgIcon('cloud') + ' السحابة (Supabase) — <span style="color:var(--ok)">متصلة</span></h3>' +
         '<p class="hint">كل تعديل تُجريه هنا يُحفَظ تلقائياً في السحابة ويظهر لجميع زوار الموقع.</p>' +
         '<div class="frm-row">' +
-          '<button class="btn btn-primary" id="syncNowBtn">🔄 مزامنة الآن</button>' +
-          '<button class="btn" id="reloadCloudBtn">☁️ إعادة التحميل من السحابة</button>' +
+          '<button class="btn btn-primary" id="syncNowBtn">' + svgIcon('refresh') + ' مزامنة الآن</button>' +
+          '<button class="btn" id="reloadCloudBtn">' + svgIcon('cloud') + ' إعادة التحميل من السحابة</button>' +
         '</div>' +
       '</div>';
   } else {
     cloudBox =
       '<div class="frm-card">' +
-        '<h3 class="sub-title" style="margin-top:0">☁️ السحابة (Supabase) — <span style="color:#ffc75d">غير متصلة</span></h3>' +
+        '<h3 class="sub-title" style="margin-top:0">' + svgIcon('cloud-off') + ' السحابة (Supabase) — <span style="color:#ffc75d">غير متصلة</span></h3>' +
         '<p class="hint">' +
           (typeof Cloud !== 'undefined' && Cloud.setupMissing
             ? 'أنشئ الجداول بتنفيذ ملف <b>supabase-setup.sql</b> في SQL Editor داخل لوحة Supabase (انظر التنبيه أعلى الصفحة).'
@@ -678,34 +679,34 @@ function renderBackupPanel(p) {
   }
 
   p.innerHTML =
-    '<h2>💾 النسخ الاحتياطي والاستعادة</h2>' +
+    '<h2>' + svgIcon('save') + ' النسخ الاحتياطي والاستعادة</h2>' +
     '<p class="hint">صدّر كل بيانات الموقع (المواد، الوحدات، الدروس، الروابط) في ملف واحد، أو استوردها على جهاز آخر.</p>' +
 
     cloudBox +
 
-    '<div class="note-box">⚠️ ملاحظة: الملفات المرفوعة في الوضع المحلي (بدون سحابة) تُخزَّن داخل متصفحك ولا تُصدَّر مع النسخة الاحتياطية — ' +
+    '<div class="note-box">' + svgIcon('alert') + ' ملاحظة: الملفات المرفوعة في الوضع المحلي (بدون سحابة) تُخزَّن داخل متصفحك ولا تُصدَّر مع النسخة الاحتياطية — ' +
     'عند اتصال Supabase تُرفع الملفات إلى السحابة وتكون متاحة للجميع.</div>' +
 
     '<div class="frm-card">' +
       '<div class="frm-row">' +
-        '<button class="btn btn-primary" id="exportBtn">⬇️ تصدير نسخة احتياطية (JSON)</button>' +
-        '<label class="btn file-label">⬆️ استيراد نسخة احتياطية<input type="file" id="importFile" accept="application/json,.json"></label>' +
-        '<button class="btn btn-danger" id="resetBtn">🔄 إعادة تعيين الموقع (حذف كل التعديلات)</button>' +
+        '<button class="btn btn-primary" id="exportBtn">' + svgIcon('download') + ' تصدير نسخة احتياطية (JSON)</button>' +
+        '<label class="btn file-label">' + svgIcon('upload') + ' استيراد نسخة احتياطية<input type="file" id="importFile" accept="application/json,.json"></label>' +
+        '<button class="btn btn-danger" id="resetBtn">' + svgIcon('refresh') + ' إعادة تعيين الموقع (حذف كل التعديلات)</button>' +
       '</div>' +
     '</div>' +
 
     '<div class="frm-card">' +
-      '<h3 class="sub-title" style="margin-top:0">📊 إحصائيات الموقع</h3>' +
+      '<h3 class="sub-title" style="margin-top:0">' + svgIcon('chart') + ' إحصائيات الموقع</h3>' +
       '<div class="item-sub" style="direction:rtl">' +
-        '📚 ' + data.subjects.length + ' مادة · 📑 ' + data.units.length + ' وحدة · 🎬 ' + data.lessons.length + ' درس · ' +
-        '➕ ' + data.resources.length + ' عنصر محتوى' +
+        svgIcon('book') + ' ' + data.subjects.length + ' مادة · ' + svgIcon('layers') + ' ' + data.units.length + ' وحدة · ' +
+        svgIcon('film') + ' ' + data.lessons.length + ' درس · ' + svgIcon('plus') + ' ' + data.resources.length + ' عنصر محتوى' +
       '</div>' +
     '</div>';
 
   var syncBtn = $('#syncNowBtn');
   if (syncBtn) syncBtn.addEventListener('click', function () {
     Cloud.syncAll(data).then(function () {
-      toast(Cloud.lastError ? '⚠️ فشلت المزامنة — حاول مجدداً' : '✅ تمت المزامنة مع السحابة', Cloud.lastError ? 'err' : 'ok');
+      toast(Cloud.lastError ? 'فشلت المزامنة — حاول مجدداً' : 'تمت المزامنة مع السحابة', Cloud.lastError ? 'err' : 'ok');
     });
   });
   var reloadBtn = $('#reloadCloudBtn');
@@ -715,9 +716,9 @@ function renderBackupPanel(p) {
       window.CLOUD_DATA = d;
       sel = { subject: '', unit: '', lesson: '' };
       renderPanel();
-      toast('✅ تم تحميل أحدث نسخة من السحابة');
+      toast('تم تحميل أحدث نسخة من السحابة');
     }).catch(function () {
-      toast('⚠️ تعذّر التحميل من السحابة', 'err');
+      toast('تعذّر التحميل من السحابة', 'err');
     });
   });
 
@@ -729,7 +730,7 @@ function renderBackupPanel(p) {
     a.download = 'aya-bac-2027-backup.json';
     a.click();
     setTimeout(function () { URL.revokeObjectURL(objUrl); }, 8000);
-    toast('✅ تم تنزيل النسخة الاحتياطية');
+    toast('تم تنزيل النسخة الاحتياطية');
   });
 
   $('#importFile').addEventListener('change', function () {
@@ -744,11 +745,11 @@ function renderBackupPanel(p) {
         if (!confirm('سيتم استبدال كل المحتوى الحالي بمحتوى النسخة الاحتياطية. متابعة؟')) return;
         data = d;
         save();
-        toast('✅ تم الاستيراد بنجاح');
+        toast('تم الاستيراد بنجاح');
         sel = { subject: '', unit: '', lesson: '' };
         renderPanel();
       } catch (e) {
-        toast('⚠️ الملف غير صالح', 'err');
+        toast('الملف غير صالح', 'err');
       }
     };
     reader.readAsText(f);
@@ -763,7 +764,7 @@ function renderBackupPanel(p) {
       sel = { subject: '', unit: '', lesson: '' };
       renderPanel();
       updateCloudBadge();
-      toast('🔄 تمت إعادة التعيين');
+      toast('تمت إعادة التعيين', 'info');
     }
   });
 }

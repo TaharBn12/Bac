@@ -5,15 +5,15 @@
 
 window.DEFAULT_DATA = {
   subjects: [
-    { id: 's-math', name: 'الرياضيات',           icon: '📐', color: 'indigo',  order: 1 },
-    { id: 's-phys', name: 'العلوم الفيزيائية',   icon: '⚛️', color: 'teal',    order: 2 },
-    { id: 's-svt',  name: 'علوم الطبيعة والحياة', icon: '🧬', color: 'green',   order: 3 },
-    { id: 's-ar',   name: 'اللغة العربية',        icon: '📖', color: 'amber',   order: 4 },
-    { id: 's-phil', name: 'الفلسفة',              icon: '💭', color: 'purple',  order: 5 },
-    { id: 's-fr',   name: 'اللغة الفرنسية',       icon: '🇫🇷', color: 'blue',    order: 6 },
-    { id: 's-en',   name: 'اللغة الإنجليزية',     icon: '🇬🇧', color: 'sky',     order: 7 },
-    { id: 's-hg',   name: 'التاريخ والجغرافيا',   icon: '🗺️', color: 'rose',    order: 8 },
-    { id: 's-isl',  name: 'العلوم الإسلامية',     icon: '🕌', color: 'emerald', order: 9 }
+    { id: 's-math', name: 'الرياضيات',           icon: 'math', color: 'indigo',  order: 1 },
+    { id: 's-phys', name: 'العلوم الفيزيائية',   icon: 'atom', color: 'teal',    order: 2 },
+    { id: 's-svt',  name: 'علوم الطبيعة والحياة', icon: 'dna', color: 'green',   order: 3 },
+    { id: 's-ar',   name: 'اللغة العربية',        icon: 'book-open', color: 'amber',   order: 4 },
+    { id: 's-phil', name: 'الفلسفة',              icon: 'bulb', color: 'purple',  order: 5 },
+    { id: 's-fr',   name: 'اللغة الفرنسية',       icon: 'fr', color: 'blue',    order: 6 },
+    { id: 's-en',   name: 'اللغة الإنجليزية',     icon: 'gb', color: 'sky',     order: 7 },
+    { id: 's-hg',   name: 'التاريخ والجغرافيا',   icon: 'globe', color: 'rose',    order: 8 },
+    { id: 's-isl',  name: 'العلوم الإسلامية',     icon: 'mosque', color: 'emerald', order: 9 }
   ],
 
   units: [
