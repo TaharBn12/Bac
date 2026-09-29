@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>آية باك 2027 — تسجيل الدخول</title>
+  <meta name="description" content="آية باك 2027 — منصة تعليمية لطلاب شهادة البكالوريا في الجزائر">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body class="auth-body">
+
+  <div class="bg-blob b1"></div>
+  <div class="bg-blob b2"></div>
+
+  <main>
+    <div class="auth-card" id="authCard">
+      <div class="logo">
+        <span class="logo-icon">🎓</span>
+        <span class="logo-text">آية <b>باك</b></span>
+        <span class="logo-year">2027</span>
+      </div>
+      <p class="tagline">منصتك للتفوق في شهادة البكالوريا 🇩🇿<br>دروس، فيديوهات، ملخصات وتمارين</p>
+
+      <form id="loginForm" novalidate>
+        <label class="field">
+          <span>🔑 كلمة السر</span>
+          <div class="pw-wrap">
+            <input type="password" id="pw" autocomplete="current-password" placeholder="••••••••" required>
+            <button type="button" class="pw-toggle" id="togglePw" aria-label="إظهار / إخفاء كلمة السر">👁️</button>
+          </div>
+        </label>
+
+        <label class="remember">
+          <input type="checkbox" id="remember">
+          تذكرني على هذا الجهاز
+        </label>
+
+        <p class="error-msg" id="err" hidden>❌ كلمة السر غير صحيحة، حاول مرة أخرى</p>
+
+        <button class="btn btn-primary btn-block" type="submit" id="loginBtn">🔓 دخول</button>
+      </form>
+    </div>
+    <p class="auth-foot">© 2027 آية باك — صُنع بحب لطلاب الجزائر 💜</p>
+  </main>
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    'use strict';
+    /* إذا كان مسجلاً الدخول مسبقاً → ننقله مباشرة للصفحة الرئيسية */
+    if (isAuthed()) location.replace('home.html');
+
+    var card = $('#authCard');
+    var pwInput = $('#pw');
+    var errBox = $('#err');
+
+    /* إظهار / إخفاء كلمة السر */
+    $('#togglePw').addEventListener('click', function () {
+      pwInput.type = pwInput.type === 'password' ? 'text' : 'password';
+      this.textContent = pwInput.type === 'password' ? '👁️' : '🙈';
+      pwInput.focus();
+    });
+
+    $('#loginForm').addEventListener('submit', function (e) {
+      e.preventDefault();
+      errBox.hidden = true;
+
+      var ok = doLogin(pwInput.value, $('#remember').checked);
+      if (ok) {
+        var btn = $('#loginBtn');
+        btn.textContent = '✅ تم الدخول، جارٍ التحويل...';
+        btn.disabled = true;
+        setTimeout(function () { location.href = 'home.html'; }, 700);
+      } else {
+        errBox.hidden = false;
+        card.classList.remove('shake');
+        void card.offsetWidth; /* إعادة تشغيل الحركة */
+        card.classList.add('shake');
+        pwInput.value = '';
+        pwInput.focus();
+      }
+    });
+
+    pwInput.focus();
+  </script>
+</body>
+</html>

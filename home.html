@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>آية باك 2027 — الصفحة الرئيسية</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🎓</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="logo" href="home.html">
+        <span class="logo-icon">🎓</span>
+        <span class="logo-text">آية <b>باك</b></span>
+        <span class="logo-year">2027</span>
+      </a>
+      <div class="top-actions">
+        <a class="btn btn-sm" href="admin.html">⚙️ لوحة التحكم</a>
+        <button class="btn btn-sm btn-danger" id="logoutBtn">🚪 خروج</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container page">
+    <section class="hero">
+      <h1>أهلاً بك في <span>آية باك 2027</span> 👋</h1>
+      <p>كل مواد البكالوريا: وحدات، دروس بالفيديو، ملخصات PDF، صور توضيحية وتمارين</p>
+      <div class="search-wrap">
+        <span class="ico">🔍</span>
+        <input type="search" id="searchInput" placeholder="ابحث عن مادة..." autocomplete="off">
+      </div>
+    </section>
+
+    <h2 class="section-title">📚 المواد الدراسية</h2>
+    <div class="grid" id="subjectsGrid"></div>
+  </main>
+
+  <footer class="footer">
+    آية باك 2027 — منصة تعليمية لطلاب البكالوريا في الجزائر 🇩🇿<br>
+    لإضافة الدروس والفيديوهات توجّه إلى <a href="admin.html">⚙️ لوحة التحكم</a>
+  </footer>
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+  <script>
+    'use strict';
+    requireAuth();
+    var data = loadData();
+
+    function renderSubjects(filter) {
+      var grid = $('#subjectsGrid');
+      var list = data.subjects.slice().sort(byOrder)
+        .filter(function (s) {
+          return !filter || s.name.indexOf(filter.trim()) !== -1;
+        });
+
+      if (!list.length) {
+        grid.innerHTML = '<div class="empty" style="grid-column:1/-1">لا توجد نتائج مطابقة لبحثك 🔍</div>';
+        return;
+      }
+
+      grid.innerHTML = list.map(function (s) {
+        var units = unitsOf(data, s.id);
+        var lessonCount = units.reduce(function (n, u) { return n + lessonsOf(data, u.id).length; }, 0);
+        return '<a class="subject-card ' + (s.color ? 'c-' + s.color : '') + '" href="subject.html?subject=' + encodeURIComponent(s.id) + '">' +
+          '<span class="arrow">‹</span>' +
+          '<div class="icon">' + escapeHtml(s.icon || '📘') + '</div>' +
+          '<div class="name">' + escapeHtml(s.name) + '</div>' +
+          '<div class="meta">' + units.length + ' وحدات · ' + lessonCount + ' دروس</div>' +
+        '</a>';
+      }).join('');
+    }
+
+    $('#searchInput').addEventListener('input', function () { renderSubjects(this.value); });
+    $('#logoutBtn').addEventListener('click', doLogout);
+
+    renderSubjects('');
+  </script>
+</body>
+</html>
