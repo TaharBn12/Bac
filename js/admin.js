@@ -3,7 +3,6 @@
    ============================================================ */
 'use strict';
 
-var SUBJECT_ICONS = ['📐', '⚛️', '🧬', '📖', '💭', '🇫🇷', '🇬🇧', '🗺️', '🕌', '📘', '📗', '📙', '📕', '✏️', '🔬', '🌍', '💻', '🎨', '🧮', '⚗️'];
 var SUBJECT_COLORS = ['indigo', 'teal', 'green', 'amber', 'purple', 'blue', 'sky', 'rose', 'emerald'];
 var KIND_META = {
   video:    { icon: '🎬', label: 'فيديو' },
@@ -180,7 +179,8 @@ function deleteCascade(where, id) {
 
 function subjectOptions(selectedId) {
   return '<option value="">— اختر المادة —</option>' + data.subjects.slice().sort(byOrder).map(function (s) {
-    return '<option value="' + s.id + '"' + (s.id === selectedId ? ' selected' : '') + '>' + escapeHtml(s.icon + ' ' + s.name) + '</option>';
+    var ico = isImageIcon(s.icon) ? '🖼️' : (s.icon || '📘');
+    return '<option value="' + s.id + '"' + (s.id === selectedId ? ' selected' : '') + '>' + escapeHtml(ico + ' ' + s.name) + '</option>';
   }).join('');
 }
 function unitOptions(subjectId, selectedId) {
@@ -216,6 +216,7 @@ function bindList(container, handlers) {
     else if (act === 'down') handlers.down(id);
     else if (act === 'rename') handlers.rename(id);
     else if (act === 'del') handlers.del(id);
+    else if (act === 'editicon' && handlers.editicon) handlers.editicon(id);
     else if (act === 'view' && handlers.view) handlers.view(id);
     else if (act === 'goto' && handlers.goto) handlers.goto(id);
   });
@@ -266,11 +267,12 @@ function renderSubjectsPanel(p) {
 
   p.innerHTML =
     '<h2>📚 إدارة المواد</h2>' +
-    '<p class="hint">أضف مواد جديدة أو عدّل ترتيبها وألوانها — كل مادة تظهر في الصفحة الرئيسية.</p>' +
+    '<p class="hint">أضف مواد جديدة — الأيقونة تكون <b>صورة عبر رابط</b> (أو إيموجي إن أردت)، ويمكنك تغيير أيقونة أي مادة بزر 🖼️.</p>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<input class="inp" id="nsName" placeholder="اسم المادة (مثال: الرياضيات)">' +
-        '<select class="inp" id="nsIcon">' + SUBJECT_ICONS.map(function (i) { return '<option>' + i + '</option>'; }).join('') + '</select>' +
+        '<input class="inp" id="nsIcon" dir="ltr" placeholder="رابط صورة الأيقونة https://... (أو إيموجي)" style="flex:2 1 240px">' +
+        '<div class="icon-preview" id="nsIconPreview">📘</div>' +
         '<select class="inp" id="nsColor">' + SUBJECT_COLORS.map(function (c) { return '<option>' + c + '</option>'; }).join('') + '</select>' +
         '<button class="btn btn-primary" id="nsAdd">➕ إضافة مادة</button>' +
       '</div>' +
@@ -279,20 +281,25 @@ function renderSubjectsPanel(p) {
       (list.length ? list.map(function (s) {
         var units = unitsOf(data, s.id);
         return '<div class="item-row c-' + (s.color || 'indigo') + '">' +
-          '<div class="item-ico">' + escapeHtml(s.icon || '📘') + '</div>' +
+          '<div class="item-ico">' + iconHTML(s.icon, '📘') + '</div>' +
           '<div class="item-info"><div class="item-title">' + escapeHtml(s.name) + '</div>' +
           '<div class="item-sub">' + units.length + ' وحدة · ' + units.reduce(function (n, u) { return n + lessonsOf(data, u.id).length; }, 0) + ' درس</div></div>' +
-          actsHTML(s.id) +
+          actsHTML(s.id, '<button class="icon-btn" data-act="editicon" data-id="' + s.id + '" title="تغيير الأيقونة (رابط صورة أو إيموجي)">🖼️</button>') +
         '</div>';
       }).join('') : '<div class="empty">لا توجد مواد — أضف أول مادة أعلاه ☝️</div>') +
     '</div>';
+
+  /* معاينة مباشرة للأيقونة أثناء الكتابة */
+  $('#nsIcon').addEventListener('input', function () {
+    $('#nsIconPreview').innerHTML = iconHTML(this.value, '📘');
+  });
 
   $('#nsAdd').addEventListener('click', function () {
     var name = $('#nsName').value.trim();
     if (!name) { toast('⚠️ اكتب اسم المادة', 'err'); return; }
     data.subjects.push({
       id: uid('s'), name: name,
-      icon: $('#nsIcon').value, color: $('#nsColor').value,
+      icon: $('#nsIcon').value.trim() || '📘', color: $('#nsColor').value,
       order: (data.subjects.reduce(function (m, s) { return Math.max(m, s.order || 0); }, 0) + 1)
     });
     save(); renderPanel(); toast('✅ تمت إضافة المادة');
@@ -305,6 +312,13 @@ function renderSubjectsPanel(p) {
       var s = getSubject(data, id);
       var nn = prompt('الاسم الجديد للمادة:', s.name);
       if (nn && nn.trim()) { s.name = nn.trim(); save(); renderPanel(); }
+    },
+    editicon: function (id) {
+      var s = getSubject(data, id);
+      var v = prompt('أيقونة المادة "' + s.name + '"\nالصق رابط الصورة (أو اكتب إيموجي):', s.icon || '');
+      if (v === null) return; /* أُلغي */
+      s.icon = v.trim() || '📘';
+      save(); renderPanel(); toast('✅ تم تحديث الأيقونة');
     },
     del: function (id) {
       var s = getSubject(data, id);

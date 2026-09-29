@@ -20,7 +20,6 @@
         <span class="logo-year">2027</span>
       </a>
       <div class="top-actions">
-        <a class="btn btn-sm" href="admin.html">⚙️ لوحة التحكم</a>
         <button class="btn btn-sm btn-danger" id="logoutBtn">🚪 خروج</button>
       </div>
     </div>
@@ -56,12 +55,7 @@
       </section>
 
       <div class="empty" id="emptyAll" hidden>
-        هذا الدرس لا يحتوي على محتوى بعد.<br>
-        أضف الفيديوهات والملفات والتمارين من <a href="admin.html">⚙️ لوحة التحكم</a>
-      </div>
-
-      <div style="margin-top:30px;text-align:center">
-        <a class="btn btn-sm" id="editLessonLink" href="admin.html">⚙️ إضافة محتوى لهذا الدرس</a>
+        هذا الدرس لا يحتوي على محتوى بعد
       </div>
     </div>
   </main>
@@ -86,11 +80,7 @@
   <script>
     'use strict';
     requireAuth();
-    initData().then(function () {
-      initLessonPage();
-      var el = $('#editLessonLink');
-      if (el && param('lesson')) el.href = 'admin.html?lesson=' + encodeURIComponent(param('lesson'));
-    });
+    initData().then(initLessonPage);
   </script>
 </body>
 </html>

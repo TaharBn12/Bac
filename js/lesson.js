@@ -287,7 +287,7 @@ function initLessonPage() {
     { label: unit.title, href: 'unit.html?unit=' + encodeURIComponent(unit.id) },
     { label: lesson.title }
   ]);
-  $('#lessonTitle').innerHTML = escapeHtml(subject.icon || '🎬') + ' ' + escapeHtml(lesson.title);
+  $('#lessonTitle').innerHTML = iconHTML(subject.icon, '🎬') + ' ' + escapeHtml(lesson.title);
 
   var player = new AyaPlayer($('#playerShell'));
 
@@ -314,9 +314,8 @@ function initLessonPage() {
   } else {
     $('#playerShell').innerHTML =
       '<div class="player"><div class="player-error" style="position:relative;display:grid">' +
-      '<div>🎬 لا توجد فيديوهات في هذا الدرس بعد<br><br>' +
-      '<a class="btn btn-primary btn-sm" href="admin.html?lesson=' + encodeURIComponent(lesson.id) + '">➕ أضف فيديو من لوحة التحكم</a>' +
-      '</div></div></div>';
+      '<div>🎬 لا توجد فيديوهات في هذا الدرس بعد</div>' +
+      '</div></div>';
   }
 
   /* ---- ملفات PDF ---- */

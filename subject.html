@@ -20,7 +20,6 @@
         <span class="logo-year">2027</span>
       </a>
       <div class="top-actions">
-        <a class="btn btn-sm" href="admin.html">⚙️ لوحة التحكم</a>
         <button class="btn btn-sm btn-danger" id="logoutBtn">🚪 خروج</button>
       </div>
     </div>
@@ -58,7 +57,7 @@
       /* الترويسة */
       $('#head').innerHTML =
         '<div class="page-head ' + (subject.color ? 'c-' + subject.color : '') + '">' +
-          '<div class="icon">' + escapeHtml(subject.icon || '📘') + '</div>' +
+          '<div class="icon">' + iconHTML(subject.icon, '📘') + '</div>' +
           '<div><h1>' + escapeHtml(subject.name) + '</h1>' +
           '<div class="meta">اختر الوحدة التعليمية لعرض دروسها</div></div>' +
         '</div>';
@@ -68,8 +67,7 @@
       var listEl = $('#unitsList');
 
       if (!units.length) {
-        listEl.outerHTML = '<div class="empty">لا توجد وحدات في هذه المادة بعد.<br>' +
-          'أضفها من <a href="admin.html">⚙️ لوحة التحكم</a></div>';
+        listEl.outerHTML = '<div class="empty">لا توجد وحدات في هذه المادة بعد</div>';
       } else {
         listEl.innerHTML = units.map(function (u, i) {
           var ls = lessonsOf(data, u.id);

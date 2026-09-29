@@ -163,11 +163,12 @@ Cloud._sync = function (data) {
   });
 };
 
-/* عميل الكتابة: يُنشأ بأرويسة كلمة السر المطلوبة في سياسات RLS */
+/* عميل الكتابة: يُنشأ بترويسة كلمة سر الأدمن المطلوبة في سياسات RLS */
 Cloud._writer = function () {
   if (!this.adminClient && window.supabase) {
+    var key = (typeof ADMIN_PASSWORD !== 'undefined' && ADMIN_PASSWORD) ? ADMIN_PASSWORD : 'taha 2026';
     this.adminClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: { headers: { 'x-admin-key': ADMIN_KEY } },
+      global: { headers: { 'x-admin-key': key } },
       auth: { persistSession: false }
     });
   }

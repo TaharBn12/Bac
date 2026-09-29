@@ -20,7 +20,6 @@
         <span class="logo-year">2027</span>
       </a>
       <div class="top-actions">
-        <a class="btn btn-sm" href="admin.html">⚙️ لوحة التحكم</a>
         <button class="btn btn-sm btn-danger" id="logoutBtn">🚪 خروج</button>
       </div>
     </div>
@@ -60,7 +59,7 @@
     /* الترويسة */
     $('#head').innerHTML =
       '<div class="page-head ' + (subject.color ? 'c-' + subject.color : '') + '">' +
-        '<div class="icon">📑</div>' +
+        '<div class="icon">' + iconHTML(subject.icon, '📑') + '</div>' +
         '<div><h1>' + escapeHtml(unit.title) + '</h1>' +
         '<div class="meta">' + escapeHtml(subject.name) + ' — اختر الدرس لمشاهدة الفيديو والملفات والتمارين</div></div>' +
       '</div>';
@@ -70,8 +69,7 @@
     var listEl = $('#lessonsList');
 
     if (!lessons.length) {
-      listEl.outerHTML = '<div class="empty">لا توجد دروس في هذه الوحدة بعد.<br>' +
-        'أضفها من <a href="admin.html">⚙️ لوحة التحكم</a></div>';
+      listEl.outerHTML = '<div class="empty">لا توجد دروس في هذه الوحدة بعد</div>';
     } else {
       listEl.innerHTML = lessons.map(function (l, i) {
         var vids = resourcesOf(data, l.id, 'video').length;

@@ -4,18 +4,22 @@
 -- طريقة التنفيذ:
 --   1) افتح مشروعك في https://supabase.com/dashboard
 --   2) من القائمة الجانبية اختر:  SQL Editor
---   3) الصف هذا الملف كاملاً واضغط:  Run
+--   3) الصق هذا الملف كاملاً واضغط:  Run
 --   4) ستظهر رسالة نجاح — انتهى! الموقع سيتصل تلقائياً.
 --
--- ملاحظة: عند تغيير كلمة السر عدّل قيمة 'aya 2026'
--- في هذا الملف (ابحث واستبدل) ثم أعد تنفيذه.
+-- ⚠️ إن كنت نفّذت نسخة قديمة من هذا الملف من قبل، نفّذ هذه
+--    النسخة مرة أخرى لتحديث مفتاح الكتابة إلى كلمة سر الأدمن
+--    الجديدة (taha 2026) — التنفيذ آمن ويكرَّر دون مشاكل.
+--
+-- ملاحظة: كلمة سر الأدمن (مفتاح الكتابة) الحالية هي: taha 2026
+-- عند تغييرها عدّلها هنا وفي js/supabase-config.js ثم أعد التنفيذ.
 -- ============================================================
 
 -- ---------- 1) الجداول ----------
 create table if not exists public.subjects (
   id         text primary key,
   name       text not null,
-  icon       text not null default '📘',
+  icon       text not null default '📘',   -- إيموجي أو رابط صورة
   color      text not null default 'indigo',
   sort_order int  not null default 0
 );
@@ -53,7 +57,7 @@ alter table public.resources enable row level security;
 
 -- ---------- 3) السياسات ----------
 -- القراءة: متاحة للجميع (زوار الموقع)
--- الكتابة: فقط لمن يرسل ترويسة x-admin-key بقيمة كلمة السر
+-- الكتابة: فقط لمن يرسل ترويسة x-admin-key بكلمة سر الأدمن
 do $$
 declare
   t text;
@@ -70,16 +74,16 @@ begin
 
     execute format(
       'create policy "admin_insert" on public.%I for insert
-         with check (current_setting(''request.headers'', true)::json ->> ''x-admin-key'' = %L);', t, 'aya 2026');
+         with check (current_setting(''request.headers'', true)::json ->> ''x-admin-key'' = %L);', t, 'taha 2026');
 
     execute format(
       'create policy "admin_update" on public.%I for update
          using      (current_setting(''request.headers'', true)::json ->> ''x-admin-key'' = %L)
-         with check (current_setting(''request.headers'', true)::json ->> ''x-admin-key'' = %L);', t, 'aya 2026', 'aya 2026');
+         with check (current_setting(''request.headers'', true)::json ->> ''x-admin-key'' = %L);', t, 'taha 2026', 'taha 2026');
 
     execute format(
       'create policy "admin_delete" on public.%I for delete
-         using (current_setting(''request.headers'', true)::json ->> ''x-admin-key'' = %L);', t, 'aya 2026');
+         using (current_setting(''request.headers'', true)::json ->> ''x-admin-key'' = %L);', t, 'taha 2026');
 
   end loop;
 end $$;
@@ -112,5 +116,5 @@ create policy "media_admin_delete" on storage.objects
   );
 
 -- ---------- تم! ✅ ----------
--- بعد التنفيذ بنجاح افتح الموقع وادخل لوحة التحكم:
+-- بعد التنفيذ بنجاح افتح لوحة التحكم (admin.html):
 -- سترى شارة «☁️ متصل بالسحابة» أعلى اللوحة.

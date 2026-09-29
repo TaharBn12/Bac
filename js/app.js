@@ -4,8 +4,9 @@
 'use strict';
 
 /* ============ الإعدادات ============ */
-/* كلمة السر: تُقرأ من js/supabase-config.js (ADMIN_KEY) إن وُجدت */
-var APP_PASSWORD = (typeof ADMIN_KEY !== 'undefined' && ADMIN_KEY) ? ADMIN_KEY : 'aya 2026';
+/* كلمات المرور: تُقرأ من js/supabase-config.js إن وُجدت */
+var APP_PASSWORD  = (typeof SITE_PASSWORD  !== 'undefined' && SITE_PASSWORD)  ? SITE_PASSWORD  : 'aya 2026';  /* دخول الموقع */
+var ADMIN_PASS    = (typeof ADMIN_PASSWORD !== 'undefined' && ADMIN_PASSWORD) ? ADMIN_PASSWORD : 'taha 2026'; /* لوحة التحكم */
 const STORAGE_KEY  = 'ayaBacData.v1';
 const AUTH_KEY     = 'ayaBacAuth';
 const REMEMBER_KEY = 'ayaBacRemember';
@@ -24,6 +25,36 @@ function escapeHtml(v) {
 }
 function param(name) { return new URLSearchParams(location.search).get(name); }
 function byOrder(a, b) { return (a.order || 0) - (b.order || 0); }
+
+/* ============ أيقونات المواد (صورة عبر رابط أو إيموجي) ============ */
+/* هل القيمة رابط صورة؟ (http/https أو data: أو ملف مرفوع sb:) */
+function isImageIcon(v) {
+  v = String(v == null ? '' : v).trim();
+  return /^(https?:)?\/\//i.test(v) || v.indexOf('data:image/') === 0 || isSbUrl(v);
+}
+
+/* مصدر الصورة (تحويل sb: إلى رابط عام في Supabase) */
+function iconSrc(v) {
+  v = String(v || '').trim();
+  if (isSbUrl(v)) {
+    if (typeof Cloud !== 'undefined' && Cloud.publicUrl) return Cloud.publicUrl(v.slice(3));
+    return SUPABASE_URL + '/storage/v1/object/public/' + SUPABASE_BUCKET + '/' + v.slice(3);
+  }
+  if (v.indexOf('//') === 0) return 'https:' + v;
+  return v;
+}
+
+/* HTML الأيقونة: صورة إن كان الرابط صالحاً، وإلا إيموجي/نص */
+function iconHTML(v, fallbackEmoji) {
+  v = String(v == null ? '' : v).trim();
+  var fb = fallbackEmoji || '📘';
+  if (!v) return escapeHtml(fb);
+  if (isImageIcon(v)) {
+    return '<img class="icon-img" src="' + escapeHtml(iconSrc(v)) + '" alt="' + escapeHtml(fb) +
+      '" loading="lazy" onerror="this.onerror=null;this.outerHTML=\'' + fb + '\'">';
+  }
+  return escapeHtml(v);
+}
 
 function fmtSize(bytes) {
   if (bytes == null) return '';
@@ -156,7 +187,7 @@ function doLogout() {
 }
 function isAdminUnlocked() { return sessionStorage.getItem(ADMIN_KEY_STORE) === '1'; }
 function unlockAdmin(password) {
-  if (password === APP_PASSWORD) { sessionStorage.setItem(ADMIN_KEY_STORE, '1'); return true; }
+  if (password === ADMIN_PASS) { sessionStorage.setItem(ADMIN_KEY_STORE, '1'); return true; }
   return false;
 }
 
