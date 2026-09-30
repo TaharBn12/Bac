@@ -155,32 +155,52 @@ function moveItem(list, id, dir) {
   save();
 }
 
+/* وضع العنصر في ترتيب محدد من نافذة التعديل (بديل سريع عن الضغط المتكرر على الأسهم). */
+function setItemOrder(list, id, requestedOrder) {
+  var sorted = list.slice().sort(byOrder);
+  var from = sorted.findIndex(function (x) { return x.id === id; });
+  if (from < 0) return;
+  var to = Math.max(0, Math.min(sorted.length - 1, (parseInt(requestedOrder, 10) || sorted.length) - 1));
+  var item = sorted.splice(from, 1)[0];
+  sorted.splice(to, 0, item);
+  /* sorted يحمل الترتيب الجديد بالفعل، لذلك لا نعيد فرزه قبل ترقيمه. */
+  sorted.forEach(function (it, index) { it.order = index + 1; });
+}
+
+/* عند نسخ المحتوى قد يشير أكثر من مورد إلى الملف المرفوع نفسه.
+   لا نحذف الملف الفعلي إلا إذا لم يبق أي مورد يستعمله. */
+function releaseFileIfUnused(url) {
+  if (!url || data.resources.some(function (r) { return r.url === url; })) return;
+  deleteFileIfUploaded(url);
+}
+
 function deleteCascade(where, id) {
+  var removedResources = [];
   if (where === 'subject') {
     var unitIds = data.units.filter(function (u) { return u.subjectId === id; }).map(function (u) { return u.id; });
     var lessonIds = data.lessons.filter(function (l) { return unitIds.indexOf(l.unitId) !== -1; }).map(function (l) { return l.id; });
-    data.resources.filter(function (r) { return lessonIds.indexOf(r.lessonId) !== -1; })
-      .forEach(function (r) { deleteFileIfUploaded(r.url); });
+    removedResources = data.resources.filter(function (r) { return lessonIds.indexOf(r.lessonId) !== -1; });
     data.resources = data.resources.filter(function (r) { return lessonIds.indexOf(r.lessonId) === -1; });
     data.lessons = data.lessons.filter(function (l) { return lessonIds.indexOf(l.id) === -1; });
     data.units = data.units.filter(function (u) { return u.subjectId !== id; });
     data.subjects = data.subjects.filter(function (s) { return s.id !== id; });
   } else if (where === 'unit') {
     var lessonIds2 = data.lessons.filter(function (l) { return l.unitId === id; }).map(function (l) { return l.id; });
-    data.resources.filter(function (r) { return lessonIds2.indexOf(r.lessonId) !== -1; })
-      .forEach(function (r) { deleteFileIfUploaded(r.url); });
+    removedResources = data.resources.filter(function (r) { return lessonIds2.indexOf(r.lessonId) !== -1; });
     data.resources = data.resources.filter(function (r) { return lessonIds2.indexOf(r.lessonId) === -1; });
     data.lessons = data.lessons.filter(function (l) { return l.unitId !== id; });
     data.units = data.units.filter(function (u) { return u.id !== id; });
   } else if (where === 'lesson') {
-    resourcesOf(data, id).forEach(function (r) { deleteFileIfUploaded(r.url); });
+    removedResources = resourcesOf(data, id);
     data.resources = data.resources.filter(function (r) { return r.lessonId !== id; });
     data.lessons = data.lessons.filter(function (l) { return l.id !== id; });
   } else if (where === 'resource') {
-    var res = data.resources.find(function (r) { return r.id === id; });
-    if (res) deleteFileIfUploaded(res.url);
+    removedResources = data.resources.filter(function (r) { return r.id === id; });
     data.resources = data.resources.filter(function (r) { return r.id !== id; });
   }
+  removedResources.map(function (r) { return r.url; }).filter(function (url, index, urls) {
+    return urls.indexOf(url) === index;
+  }).forEach(releaseFileIfUnused);
   save();
 }
 
@@ -283,6 +303,7 @@ function openEditDialog(opts) {
     }
     return '<label class="field"><span>' + escapeHtml(f.label) + '</span>' +
       '<input class="inp" data-key="' + f.key + '" value="' + escapeHtml(f.value || '') + '"' +
+      (f.type === 'number' ? ' type="number" min="1" step="1" inputmode="numeric"' : '') +
       (f.dir ? ' dir="' + f.dir + '"' : '') + ' placeholder="' + escapeHtml(f.placeholder || '') + '"></label>';
   }).join('');
 
@@ -334,31 +355,60 @@ function openEditDialog(opts) {
 }
 
 /* ============ نسخ العناصر ============ */
-function duplicateLesson(id) {
-  var l = getLesson(data, id);
-  if (!l) return;
-  var maxOrder = lessonsOf(data, l.unitId).reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0);
-  data.lessons.push({ id: uid('l'), unitId: l.unitId, title: l.title + ' (نسخة)', order: maxOrder + 1 });
-  save();
+/* النسخ يحتفظ بالمراجع إلى الملفات نفسها ولا يعيد رفعها، لذلك هو سريع ولا يستهلك مساحة إضافية. */
+function copyResourcesToLesson(sourceLessonId, targetLessonId) {
+  resourcesOf(data, sourceLessonId).forEach(function (r) {
+    data.resources.push({
+      id: uid('r'), lessonId: targetLessonId, kind: r.kind,
+      title: r.title || '', url: r.url, size: r.size || undefined,
+      exerciseType: r.exerciseType || undefined, order: r.order || 1
+    });
+  });
 }
 
-function duplicateUnit(id) {
-  var u = getUnit(data, id);
-  if (!u) return;
-  var nid = uid('u');
-  var maxOrder = unitsOf(data, u.subjectId).reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0);
-  data.units.push({ id: nid, subjectId: u.subjectId, title: u.title + ' (نسخة)', order: maxOrder + 1 });
-  /* ننسخ الدروس أيضاً (بدون محتواها) */
-  lessonsOf(data, id).forEach(function (l) {
-    data.lessons.push({ id: uid('l'), unitId: nid, title: l.title, order: l.order });
-  });
+function duplicateLesson(id) {
+  var l = getLesson(data, id);
+  if (!l) return null;
+  var nid = uid('l');
+  var maxOrder = lessonsOf(data, l.unitId).reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0);
+  data.lessons.push({ id: nid, unitId: l.unitId, title: l.title + ' (نسخة)', order: maxOrder + 1 });
+  copyResourcesToLesson(l.id, nid);
   save();
+  return nid;
+}
+
+function duplicateUnit(id, targetSubjectId, deferSave) {
+  var u = getUnit(data, id);
+  if (!u) return null;
+  var subjectId = targetSubjectId || u.subjectId;
+  var nid = uid('u');
+  var maxOrder = unitsOf(data, subjectId).reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0);
+  data.units.push({ id: nid, subjectId: subjectId, title: u.title + ' (نسخة)', order: maxOrder + 1 });
+  lessonsOf(data, id).forEach(function (l) {
+    var newLessonId = uid('l');
+    data.lessons.push({ id: newLessonId, unitId: nid, title: l.title, order: l.order });
+    copyResourcesToLesson(l.id, newLessonId);
+  });
+  if (!deferSave) save();
+  return nid;
+}
+
+function duplicateSubject(id) {
+  var s = getSubject(data, id);
+  if (!s) return null;
+  var nid = uid('s');
+  var maxOrder = data.subjects.reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0);
+  data.subjects.push({ id: nid, name: s.name + ' (نسخة)', icon: s.icon || 'book', color: s.color || 'indigo', order: maxOrder + 1 });
+  unitsOf(data, id).forEach(function (u) { duplicateUnit(u.id, nid, true); });
+  save();
+  return nid;
 }
 
 /* ============ عرض اللوحات ============ */
 function renderPanel() {
   var p = $('#panel');
   if (currentTab === 'subjects') renderSubjectsPanel(p);
+  else if (currentTab === 'organizer') renderOrganizerPanel(p);
   else if (currentTab === 'units') renderUnitsPanel(p);
   else if (currentTab === 'lessons') renderLessonsPanel(p);
   else if (currentTab === 'content') renderContentPanel(p);
@@ -368,13 +418,217 @@ function renderPanel() {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+/* ---------- منظّم المحتوى: رؤية كاملة للمادة ← الوحدة ← الدرس ---------- */
+function goToAdminTab(tab) {
+  currentTab = tab;
+  $all('.tab').forEach(function (x) { x.classList.toggle('active', x.dataset.tab === tab); });
+  renderPanel();
+}
+
+function openQuickUnitDialog(subjectId) {
+  var subject = getSubject(data, subjectId);
+  if (!subject) return;
+  var nextOrder = unitsOf(data, subjectId).length + 1;
+  openEditDialog({
+    title: 'إضافة وحدة إلى ' + subject.name, icon: 'layers',
+    fields: [
+      { key: 'title', label: 'عنوان الوحدة', placeholder: 'مثال: الدوال العددية' },
+      { key: 'order', label: 'موضعها في الترتيب', type: 'number', value: nextOrder }
+    ],
+    onSave: function (v) {
+      var title = v.title.trim();
+      if (!title) { toast('اكتب عنوان الوحدة', 'err'); return; }
+      var id = uid('u');
+      data.units.push({ id: id, subjectId: subjectId, title: title, order: nextOrder });
+      setItemOrder(unitsOf(data, subjectId), id, v.order);
+      save(); renderPanel(); toast('تمت إضافة الوحدة');
+    }
+  });
+}
+
+function openQuickLessonDialog(unitId) {
+  var unit = getUnit(data, unitId);
+  if (!unit) return;
+  var nextOrder = lessonsOf(data, unitId).length + 1;
+  openEditDialog({
+    title: 'إضافة درس إلى ' + unit.title, icon: 'film',
+    fields: [
+      { key: 'title', label: 'عنوان الدرس', placeholder: 'مثال: تعريف الدالة' },
+      { key: 'order', label: 'موضعه في الترتيب', type: 'number', value: nextOrder }
+    ],
+    onSave: function (v) {
+      var title = v.title.trim();
+      if (!title) { toast('اكتب عنوان الدرس', 'err'); return; }
+      var id = uid('l');
+      data.lessons.push({ id: id, unitId: unitId, title: title, order: nextOrder });
+      setItemOrder(lessonsOf(data, unitId), id, v.order);
+      save(); renderPanel(); toast('تمت إضافة الدرس');
+    }
+  });
+}
+
+function openCreatePathDialog() {
+  openEditDialog({
+    title: 'بناء مسار تعليمي جديد', icon: 'sparkles',
+    fields: [
+      { key: 'subject', label: 'اسم المادة', placeholder: 'مثال: الإعلام الآلي' },
+      { key: 'icon', label: 'أيقونة المادة — اسم SVG أو رابط صورة (اختياري)', type: 'icon', value: 'book', placeholder: 'مثال: book أو https://...' },
+      { key: 'color', label: 'لون المادة', type: 'select', value: 'indigo', options: colorOptions() },
+      { key: 'unit', label: 'عنوان الوحدة الأولى', placeholder: 'مثال: البرمجة' },
+      { key: 'lesson', label: 'عنوان الدرس الأول', placeholder: 'مثال: مدخل إلى الخوارزميات' }
+    ],
+    onSave: function (v) {
+      var subjectName = v.subject.trim(), unitTitle = v.unit.trim(), lessonTitle = v.lesson.trim();
+      if (!subjectName || !unitTitle || !lessonTitle) {
+        toast('أكمل اسم المادة والوحدة والدرس', 'err');
+        return;
+      }
+      var subjectId = uid('s'), unitId = uid('u'), lessonId = uid('l');
+      data.subjects.push({
+        id: subjectId, name: subjectName, icon: v.icon.trim() || 'book', color: v.color || 'indigo',
+        order: data.subjects.length + 1
+      });
+      data.units.push({ id: unitId, subjectId: subjectId, title: unitTitle, order: 1 });
+      data.lessons.push({ id: lessonId, unitId: unitId, title: lessonTitle, order: 1 });
+      save(); renderPanel(); toast('تم إنشاء المادة والوحدة والدرس');
+    }
+  });
+}
+
+function treeUnitHTML(unit) {
+  var lessons = lessonsOf(data, unit.id);
+  var subject = getSubject(data, unit.subjectId);
+  var unitSearch = (unit.title + ' ' + lessons.map(function (l) { return l.title; }).join(' ')).toLocaleLowerCase();
+  return '<details class="tree-unit" open data-search="' + escapeHtml(unitSearch) + '">' +
+    '<summary><span class="tree-label"><span class="tree-dot"></span>' + escapeHtml(unit.title) + '</span>' +
+      '<span class="tree-meta">' + lessons.length + ' درس</span></summary>' +
+    '<div class="tree-node-body">' +
+      '<div class="tree-actions">' +
+        '<button type="button" class="tree-action" data-organizer-act="add-lesson" data-id="' + unit.id + '">' + svgIcon('plus') + ' إضافة درس</button>' +
+        '<button type="button" class="tree-action" data-organizer-act="manage-unit" data-id="' + unit.id + '">' + svgIcon('gear') + ' إدارة الوحدة</button>' +
+        '<button type="button" class="tree-action" data-organizer-act="copy-unit" data-id="' + unit.id + '">' + svgIcon('copy') + ' نسخ</button>' +
+      '</div>' +
+      '<div class="tree-lessons">' +
+        (lessons.length ? lessons.map(function (l) {
+          var resources = resourcesOf(data, l.id).length;
+          return '<article class="tree-lesson" data-search="' + escapeHtml(l.title.toLocaleLowerCase()) + '">' +
+            '<span class="tree-lesson-title">' + svgIcon('film') + ' ' + escapeHtml(l.title) +
+              '<span class="tree-meta">' + resources + ' محتوى</span></span>' +
+            '<span class="tree-actions">' +
+              '<button type="button" class="tree-action" data-organizer-act="manage-lesson" data-id="' + l.id + '">' + svgIcon('plus') + ' المحتوى</button>' +
+              '<button type="button" class="tree-action" data-organizer-act="preview-lesson" data-id="' + l.id + '" title="معاينة الدرس" aria-label="معاينة الدرس">' + svgIcon('eye') + '</button>' +
+            '</span>' +
+          '</article>';
+        }).join('') : '<div class="tree-empty">لا توجد دروس بعد — أضف أول درس من الزر أعلاه.</div>') +
+      '</div>' +
+    '</div>' +
+  '</details>';
+}
+
+function treeSubjectHTML(subject) {
+  var units = unitsOf(data, subject.id);
+  var lessonsCount = units.reduce(function (sum, u) { return sum + lessonsOf(data, u.id).length; }, 0);
+  var search = (subject.name + ' ' + units.map(function (u) {
+    return u.title + ' ' + lessonsOf(data, u.id).map(function (l) { return l.title; }).join(' ');
+  }).join(' ')).toLocaleLowerCase();
+  return '<details class="tree-subject" open data-search="' + escapeHtml(search) + '">' +
+    '<summary><span class="tree-label tree-subject-label">' + iconHTML(subject.icon, 'book') + ' ' + escapeHtml(subject.name) + '</span>' +
+      '<span class="tree-meta">' + units.length + ' وحدة · ' + lessonsCount + ' درس</span></summary>' +
+    '<div class="tree-node-body">' +
+      '<div class="tree-actions">' +
+        '<button type="button" class="tree-action primary" data-organizer-act="add-unit" data-id="' + subject.id + '">' + svgIcon('plus') + ' إضافة وحدة</button>' +
+        '<button type="button" class="tree-action" data-organizer-act="manage-subject" data-id="' + subject.id + '">' + svgIcon('gear') + ' إدارة المادة</button>' +
+        '<button type="button" class="tree-action" data-organizer-act="copy-subject" data-id="' + subject.id + '">' + svgIcon('copy') + ' نسخ المادة كاملة</button>' +
+      '</div>' +
+      '<div class="tree-units">' +
+        (units.length ? units.map(treeUnitHTML).join('') : '<div class="tree-empty">لا توجد وحدات بعد — أضف أول وحدة من الزر أعلاه.</div>') +
+      '</div>' +
+    '</div>' +
+  '</details>';
+}
+
+function renderOrganizerPanel(p) {
+  p.innerHTML =
+    '<h2>' + svgIcon('layers') + ' منظّم المحتوى</h2>' +
+    '<p class="hint">عرض المادة ← الوحدة ← الدرس في مكان واحد. استخدمه للإضافة السريعة، البحث، النسخ أو الوصول المباشر إلى محتوى أي درس.</p>' +
+    '<div class="organizer-head">' +
+      '<div class="organizer-stats">' +
+        '<span>' + svgIcon('book') + ' ' + data.subjects.length + ' مادة</span>' +
+        '<span>' + svgIcon('layers') + ' ' + data.units.length + ' وحدة</span>' +
+        '<span>' + svgIcon('film') + ' ' + data.lessons.length + ' درس</span>' +
+      '</div>' +
+      '<button type="button" class="btn btn-primary" id="buildPathBtn">' + svgIcon('sparkles') + ' بناء مادة ووحدة ودرس</button>' +
+    '</div>' +
+    '<div class="organizer-search"><span>' + svgIcon('search') + '</span><input id="organizerSearch" type="search" placeholder="ابحث باسم مادة أو وحدة أو درس…" autocomplete="off"></div>' +
+    '<div class="content-tree" id="contentTree">' +
+      (data.subjects.length ? data.subjects.slice().sort(byOrder).map(treeSubjectHTML).join('') : '<div class="empty">لا توجد مواد بعد — ابدأ ببناء أول مسار تعليمي.</div>') +
+    '</div>';
+
+  $('#buildPathBtn').addEventListener('click', openCreatePathDialog);
+  var tree = $('#contentTree');
+  tree.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-organizer-act]');
+    if (!btn) return;
+    e.preventDefault();
+    e.stopPropagation();
+    var id = btn.dataset.id, action = btn.dataset.organizerAct;
+    if (action === 'add-unit') openQuickUnitDialog(id);
+    else if (action === 'add-lesson') openQuickLessonDialog(id);
+    else if (action === 'manage-subject') { sel.subject = id; goToAdminTab('subjects'); }
+    else if (action === 'manage-unit') {
+      var unit = getUnit(data, id);
+      if (unit) { sel.subject = unit.subjectId; sel.unit = id; sel.lesson = ''; goToAdminTab('units'); }
+    } else if (action === 'manage-lesson') {
+      var path = lessonPath(data, id);
+      if (path && path.subject && path.unit) {
+        sel.subject = path.subject.id; sel.unit = path.unit.id; sel.lesson = id; goToAdminTab('content');
+      }
+    } else if (action === 'preview-lesson') {
+      window.open('lesson.html?lesson=' + encodeURIComponent(id), '_blank');
+    } else if (action === 'copy-unit') {
+      var unitToCopy = getUnit(data, id);
+      if (unitToCopy && confirm('نسخ وحدة "' + unitToCopy.title + '" مع كل دروسها ومحتواها؟')) {
+        duplicateUnit(id); renderPanel(); toast('تم إنشاء نسخة كاملة من الوحدة');
+      }
+    } else if (action === 'copy-subject') {
+      var subjectToCopy = getSubject(data, id);
+      if (subjectToCopy && confirm('نسخ مادة "' + subjectToCopy.name + '" بكامل وحداتها ودروسها ومحتواها؟')) {
+        duplicateSubject(id); renderPanel(); toast('تم إنشاء نسخة كاملة من المادة');
+      }
+    }
+  });
+
+  var search = $('#organizerSearch');
+  search.addEventListener('input', function () {
+    var q = this.value.trim().toLocaleLowerCase();
+    $all('.tree-subject', tree).forEach(function (subjectEl) {
+      var subjectMatches = !q || subjectEl.querySelector('summary').textContent.toLocaleLowerCase().indexOf(q) !== -1;
+      var visibleUnit = false;
+      $all('.tree-unit', subjectEl).forEach(function (unitEl) {
+        var unitMatches = subjectMatches || (!q || unitEl.querySelector('summary').textContent.toLocaleLowerCase().indexOf(q) !== -1);
+        var visibleLesson = false;
+        $all('.tree-lesson', unitEl).forEach(function (lessonEl) {
+          var showLesson = unitMatches || !q || lessonEl.dataset.search.indexOf(q) !== -1;
+          lessonEl.hidden = !showLesson;
+          if (showLesson) visibleLesson = true;
+        });
+        var showUnit = unitMatches || visibleLesson;
+        unitEl.hidden = !showUnit;
+        if (showUnit) { visibleUnit = true; if (q) unitEl.open = true; }
+      });
+      subjectEl.hidden = !visibleUnit && !subjectMatches;
+      if (q && !subjectEl.hidden) subjectEl.open = true;
+    });
+  });
+}
+
 /* ---------- لوحة المواد ---------- */
 function renderSubjectsPanel(p) {
   var list = data.subjects.slice().sort(byOrder);
 
   p.innerHTML =
     '<h2>' + svgIcon('book') + ' إدارة المواد</h2>' +
-    '<p class="hint">أضف مواد جديدة — وعدّل كل شيء (الاسم والأيقونة واللون) بزر التعديل، ورتّب بالأسهم، وانسخ الوحدات والدروس بزر النسخ.</p>' +
+    '<p class="hint">أضف مادة، وعدّل الاسم والأيقونة واللون وموضع العرض. استخدم «منظّم المحتوى» لبناء مسار كامل أو نسخ مادة بكل محتواها.</p>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<input class="inp" id="nsName" placeholder="اسم المادة (مثال: الرياضيات)">' +
@@ -391,7 +645,7 @@ function renderSubjectsPanel(p) {
           '<div class="item-ico">' + iconHTML(s.icon, 'book') + '</div>' +
           '<div class="item-info"><div class="item-title">' + escapeHtml(s.name) + '</div>' +
           '<div class="item-sub">' + units.length + ' وحدة · ' + units.reduce(function (n, u) { return n + lessonsOf(data, u.id).length; }, 0) + ' درس</div></div>' +
-          actsHTML(s.id) +
+          actsHTML(s.id, '<button class="icon-btn" data-act="copy" data-id="' + s.id + '" title="نسخ المادة بكل محتواها">' + svgIcon('copy') + '</button>') +
         '</div>';
       }).join('') : '<div class="empty">لا توجد مواد — أضف أول مادة أعلاه</div>') +
     '</div>';
@@ -422,15 +676,24 @@ function renderSubjectsPanel(p) {
         fields: [
           { key: 'name', label: 'اسم المادة', value: s.name, placeholder: 'مثال: الرياضيات' },
           { key: 'icon', label: 'الأيقونة — اسم SVG أو رابط صورة', type: 'icon', value: s.icon || '', placeholder: 'مثال: math أو https://...' },
-          { key: 'color', label: 'اللون', type: 'select', value: s.color, options: colorOptions() }
+          { key: 'color', label: 'اللون', type: 'select', value: s.color, options: colorOptions() },
+          { key: 'order', label: 'موضع المادة في الترتيب', type: 'number', value: s.order || 1 }
         ],
         onSave: function (v) {
           s.name = v.name.trim() || s.name;
           s.icon = v.icon.trim() || 'book';
           s.color = v.color || 'indigo';
+          setItemOrder(data.subjects, s.id, v.order);
           save(); renderPanel(); toast('تم حفظ تعديلات المادة');
         }
       });
+    },
+    copy: function (id) {
+      var s = getSubject(data, id);
+      if (s && confirm('إنشاء نسخة من مادة "' + s.name + '" مع كل الوحدات والدروس والمحتوى؟')) {
+        duplicateSubject(id);
+        renderPanel(); toast('تم إنشاء نسخة كاملة من المادة', 'info');
+      }
     },
     del: function (id) {
       var s = getSubject(data, id);
@@ -450,7 +713,7 @@ function renderUnitsPanel(p) {
 
   p.innerHTML =
     '<h2>' + svgIcon('layers') + ' إدارة الوحدات</h2>' +
-    '<p class="hint">اختر المادة ثم أضف وحداتها التعليمية.</p>' +
+    '<p class="hint">اختر المادة ثم أضف وحداتها التعليمية. من التعديل تستطيع نقل الوحدة لمادة أخرى وتحديد موضعها بدقة.</p>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<select class="inp" id="uSubject">' + subjectOptions(sel.subject) + '</select>' +
@@ -493,24 +756,28 @@ function renderUnitsPanel(p) {
         fields: [
           { key: 'title', label: 'عنوان الوحدة', value: u.title },
           { key: 'subject', label: 'المادة (لنقل الوحدة إليها)', type: 'select', value: u.subjectId,
-            options: data.subjects.slice().sort(byOrder).map(function (s) { return { value: s.id, label: s.name }; }) }
+            options: data.subjects.slice().sort(byOrder).map(function (s) { return { value: s.id, label: s.name }; }) },
+          { key: 'order', label: 'موضع الوحدة في الترتيب', type: 'number', value: u.order || 1 }
         ],
         onSave: function (v) {
           u.title = v.title.trim() || u.title;
           var target = getSubject(data, v.subject);
+          var oldSubjectId = u.subjectId;
           if (target && target.id !== u.subjectId) {
             u.subjectId = target.id;
+            normalizeOrders(data.units.filter(function (x) { return x.subjectId === oldSubjectId; }));
             sel.subject = target.id; sel.unit = ''; sel.lesson = '';
           }
+          setItemOrder(data.units.filter(function (x) { return x.subjectId === u.subjectId; }), u.id, v.order);
           save(); renderPanel(); toast('تم حفظ تعديلات الوحدة');
         }
       });
     },
     copy: function (id) {
       var u = getUnit(data, id);
-      if (confirm('إنشاء نسخة من وحدة "' + u.title + '" مع دروسها (بدون فيديوهات وملفات)؟')) {
+      if (confirm('إنشاء نسخة من وحدة "' + u.title + '" مع كل دروسها وفيديوهاتها وملفاتها؟')) {
         duplicateUnit(id);
-        renderPanel(); toast('تم إنشاء نسخة من الوحدة', 'info');
+        renderPanel(); toast('تم إنشاء نسخة كاملة من الوحدة', 'info');
       }
     },
     del: function (id) {
@@ -588,22 +855,26 @@ function renderLessonsPanel(p) {
         title: 'تعديل الدرس', icon: 'film',
         fields: [
           { key: 'title', label: 'عنوان الدرس', value: l.title },
-          { key: 'unit', label: 'الوحدة (لنقل الدرس إليها)', type: 'select', value: l.unitId, options: unitOpts }
+          { key: 'unit', label: 'الوحدة (لنقل الدرس إليها)', type: 'select', value: l.unitId, options: unitOpts },
+          { key: 'order', label: 'موضع الدرس في الترتيب', type: 'number', value: l.order || 1 }
         ],
         onSave: function (v) {
           l.title = v.title.trim() || l.title;
           var targetUnit = getUnit(data, v.unit);
+          var oldUnitId = l.unitId;
           if (targetUnit && targetUnit.id !== l.unitId) {
             l.unitId = targetUnit.id;
+            normalizeOrders(data.lessons.filter(function (x) { return x.unitId === oldUnitId; }));
             sel.subject = targetUnit.subjectId; sel.unit = targetUnit.id; sel.lesson = l.id;
           }
+          setItemOrder(data.lessons.filter(function (x) { return x.unitId === l.unitId; }), l.id, v.order);
           save(); renderPanel(); toast('تم حفظ تعديلات الدرس');
         }
       });
     },
     copy: function (id) {
       duplicateLesson(id);
-      renderPanel(); toast('تم إنشاء نسخة من الدرس (بدون محتوى)', 'info');
+      renderPanel(); toast('تم إنشاء نسخة من الدرس مع محتواه', 'info');
     },
     del: function (id) {
       var l = getLesson(data, id);
@@ -693,8 +964,9 @@ function renderResourceSections(area, lesson) {
       rename: function (id) {
         var r = data.resources.find(function (x) { return x.id === id; });
         var fields = [
-          { key: 'title', label: 'العنوان', value: r.title || '', placeholder: 'مثال: الجزء الأول' },
-          { key: 'url', label: 'الرابط', value: r.url, dir: 'ltr', placeholder: 'https://... أو اتركه كما هو للملفات المرفوعة' }
+          { key: 'title', label: 'العنوان الظاهر للطلاب', value: r.title || '', placeholder: 'مثال: ملخص الدرس الأول' },
+          { key: 'url', label: 'الرابط', value: r.url, dir: 'ltr', placeholder: 'https://... أو اتركه كما هو للملفات المرفوعة' },
+          { key: 'order', label: 'موضعه في ترتيب هذا النوع', type: 'number', value: r.order || 1 }
         ];
         if (r.kind === 'exercise') {
           fields.push({ key: 'type', label: 'نوع التمرين', type: 'select', value: r.exerciseType || 'pdf',
@@ -711,19 +983,62 @@ function renderResourceSections(area, lesson) {
             if (v.title.trim()) r.title = v.title.trim();
             if (v.url.trim()) r.url = v.url.trim();
             if (r.kind === 'exercise') r.exerciseType = v.type;
+            setItemOrder(resourcesOf(data, lesson.id, r.kind), r.id, v.order);
             save(); renderResourceSections(area, lesson); toast('تم حفظ التعديلات');
           }
         });
       },
+      copy: function (id) { openCopyResourceDialog(id, area, lesson); },
+      view: function (id) { previewResource(id); },
       del: function (id) {
         var r = data.resources.find(function (x) { return x.id === id; });
-        if (confirm('حذف "' + (r.title || KIND_META[r.kind].label) + '"؟')) {
+        if (r && confirm('حذف "' + (r.title || KIND_META[r.kind].label) + '"؟')) {
           deleteCascade('resource', id);
           renderResourceSections(area, lesson);
           toast('تم الحذف', 'info');
         }
       }
     });
+  });
+}
+
+/* معاينة المورد من لوحة الإدارة من دون إظهار رابطه في الواجهة العامة. */
+function previewResource(id) {
+  var r = data.resources.find(function (x) { return x.id === id; });
+  if (!r) return;
+  resolveSrc(r.url).then(function (res) {
+    if (res.kind === 'error') { toast(res.message || 'الملف غير متاح', 'err'); return; }
+    if (res.kind === 'youtube') window.open('https://www.youtube.com/watch?v=' + res.id, '_blank');
+    else window.open(res.src, '_blank', 'noopener');
+  });
+}
+
+/* نسخ فيديو أو ملف أو تمرين إلى درس آخر مع الاحتفاظ بعنوانه ونوعه وترتيبه. */
+function openCopyResourceDialog(id, area, currentLesson) {
+  var resource = data.resources.find(function (x) { return x.id === id; });
+  if (!resource) return;
+  var options = data.lessons.slice().sort(byOrder).map(function (lesson) {
+    var path = lessonPath(data, lesson.id);
+    var label = (path.subject ? path.subject.name : 'مادة') + ' — ' +
+      (path.unit ? path.unit.title : 'وحدة') + ' — ' + lesson.title;
+    return { value: lesson.id, label: label };
+  });
+  openEditDialog({
+    title: 'نسخ ' + (resource.title || KIND_META[resource.kind].label), icon: 'copy',
+    fields: [{ key: 'lesson', label: 'الدرس المستهدف', type: 'select', value: currentLesson.id, options: options }],
+    onSave: function (v) {
+      var target = getLesson(data, v.lesson);
+      if (!target) { toast('اختر درساً صالحاً', 'err'); return; }
+      var maxOrder = resourcesOf(data, target.id, resource.kind).reduce(function (m, r) { return Math.max(m, r.order || 0); }, 0);
+      data.resources.push({
+        id: uid('r'), lessonId: target.id, kind: resource.kind, title: resource.title || '',
+        url: resource.url, size: resource.size || undefined, exerciseType: resource.exerciseType || undefined,
+        order: maxOrder + 1
+      });
+      save();
+      if (target.id === currentLesson.id) renderResourceSections(area, currentLesson);
+      toast('تم نسخ المحتوى إلى الدرس المختار');
+    }
   });
 }
 
@@ -775,7 +1090,7 @@ function resRowHTML(r) {
   if (isSbUrl(r.url)) { src = svgIcon('cloud') + ' ملف في السحابة' + (r.size ? ' (' + fmtSize(r.size) + ')' : ''); rtl = true; }
   else if (isIdbUrl(r.url)) { src = svgIcon('folder') + ' ملف مرفوع' + (r.size ? ' (' + fmtSize(r.size) + ')' : ''); rtl = true; }
   else if (youtubeId(r.url)) { src = svgIcon('film') + ' يوتيوب'; rtl = true; }
-  else src = svgIcon('link') + ' ' + escapeHtml(r.url);
+  else { src = svgIcon('link') + ' رابط خارجي'; rtl = true; }
 
   var typeLbl = r.kind === 'exercise' && r.exerciseType
     ? ' — ' + ({ video: 'فيديو', pdf: 'PDF', link: 'رابط' }[r.exerciseType])
@@ -785,7 +1100,8 @@ function resRowHTML(r) {
     '<div class="item-ico">' + svgIcon(meta.icon) + '</div>' +
     '<div class="item-info"><div class="item-title">' + escapeHtml(r.title || meta.label) + typeLbl + '</div>' +
     '<div class="item-sub"' + (rtl ? ' dir="rtl" style="text-align:right"' : '') + '>' + src + '</div></div>' +
-    actsHTML(r.id) +
+    actsHTML(r.id, '<button class="icon-btn" data-act="view" data-id="' + r.id + '" title="معاينة">' + svgIcon('eye') + '</button>' +
+                    '<button class="icon-btn" data-act="copy" data-id="' + r.id + '" title="نسخ إلى درس آخر">' + svgIcon('copy') + '</button>') +
   '</div>';
 }
 
