@@ -3,7 +3,12 @@
    ============================================================ */
 'use strict';
 
-var SUBJECT_COLORS = ['indigo', 'teal', 'green', 'amber', 'purple', 'blue', 'sky', 'rose', 'emerald'];
+var SUBJECT_COLORS = ['indigo', 'teal', 'green', 'amber', 'purple', 'blue', 'sky', 'rose', 'emerald', 'orange', 'cyan', 'lime', 'pink', 'violet', 'slate'];
+var COLOR_LABELS = {
+  indigo: 'نيلي', teal: 'تركوازي', green: 'أخضر', amber: 'كهرماني', purple: 'أرجواني',
+  blue: 'أزرق', sky: 'سماوي', rose: 'وردي داكن', emerald: 'زمردي', orange: 'برتقالي',
+  cyan: 'سيان', lime: 'ليموني', pink: 'وردي', violet: 'بنفسجي', slate: 'رمادي'
+};
 var KIND_META = {
   video:    { icon: 'film', label: 'فيديو' },
   pdf:      { icon: 'file', label: 'ملف PDF' },
@@ -202,7 +207,7 @@ function actsHTML(id, extra) {
     (extra || '') +
     '<button class="icon-btn" data-act="up" data-id="' + id + '" title="تحريك للأعلى">' + svgIcon('chevron-up') + '</button>' +
     '<button class="icon-btn" data-act="down" data-id="' + id + '" title="تحريك للأسفل">' + svgIcon('chevron-down') + '</button>' +
-    '<button class="icon-btn" data-act="rename" data-id="' + id + '" title="تعديل الاسم">' + svgIcon('pencil') + '</button>' +
+    '<button class="icon-btn" data-act="rename" data-id="' + id + '" title="تعديل">' + svgIcon('pencil') + '</button>' +
     '<button class="icon-btn danger" data-act="del" data-id="' + id + '" title="حذف">' + svgIcon('trash') + '</button>' +
   '</div>';
 }
@@ -217,7 +222,7 @@ function bindList(container, handlers) {
     else if (act === 'down') handlers.down(id);
     else if (act === 'rename') handlers.rename(id);
     else if (act === 'del') handlers.del(id);
-    else if (act === 'editicon' && handlers.editicon) handlers.editicon(id);
+    else if (act === 'copy' && handlers.copy) handlers.copy(id);
     else if (act === 'view' && handlers.view) handlers.view(id);
     else if (act === 'goto' && handlers.goto) handlers.goto(id);
   });
@@ -249,6 +254,107 @@ function bindFilePickers(root) {
 
 function clearPick(key) { delete pickedFiles[key]; }
 
+/* ============ نافذة التعديل الموحدة (بدل النوافذ المنبثقة البدائية) ============ */
+function colorOptions() {
+  return SUBJECT_COLORS.map(function (c) { return { value: c, label: COLOR_LABELS[c] || c }; });
+}
+
+function openEditDialog(opts) {
+  /* opts: { title, icon, fields: [{key,label,type,value,options,placeholder,dir}], onSave(values) } */
+
+  var old = document.querySelector('.modal-overlay');
+  if (old) old.remove();
+
+  var fieldsHTML = opts.fields.map(function (f) {
+    if (f.type === 'select') {
+      return '<label class="field"><span>' + escapeHtml(f.label) + '</span>' +
+        '<select class="inp" data-key="' + f.key + '">' +
+        (f.options || []).map(function (o) {
+          return '<option value="' + escapeHtml(o.value) + '"' + (o.value === f.value ? ' selected' : '') + '>' +
+            escapeHtml(o.label) + '</option>';
+        }).join('') + '</select></label>';
+    }
+    if (f.type === 'icon') {
+      return '<label class="field"><span>' + escapeHtml(f.label) + '</span>' +
+        '<div class="icon-field">' +
+          '<input class="inp" data-key="' + f.key + '" dir="ltr" placeholder="' + escapeHtml(f.placeholder || '') + '" value="' + escapeHtml(f.value || '') + '">' +
+          '<div class="icon-preview" data-preview="' + f.key + '">' + iconHTML(f.value, 'book') + '</div>' +
+        '</div></label>';
+    }
+    return '<label class="field"><span>' + escapeHtml(f.label) + '</span>' +
+      '<input class="inp" data-key="' + f.key + '" value="' + escapeHtml(f.value || '') + '"' +
+      (f.dir ? ' dir="' + f.dir + '"' : '') + ' placeholder="' + escapeHtml(f.placeholder || '') + '"></label>';
+  }).join('');
+
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML =
+    '<div class="modal" role="dialog" aria-modal="true">' +
+      '<h3>' + svgIcon(opts.icon || 'pencil') + ' ' + escapeHtml(opts.title) + '</h3>' +
+      '<form class="edit-form">' + fieldsHTML +
+        '<div class="acts">' +
+          '<button type="button" class="btn" data-close>' + svgIcon('x') + ' إلغاء</button>' +
+          '<button type="submit" class="btn btn-primary">' + svgIcon('check') + ' حفظ</button>' +
+        '</div>' +
+      '</form>' +
+    '</div>';
+  document.body.appendChild(overlay);
+
+  /* معاينة مباشرة للأيقونة */
+  var iconInput = overlay.querySelector('input[data-key="icon"]');
+  if (iconInput) {
+    iconInput.addEventListener('input', function () {
+      var pv = overlay.querySelector('[data-preview="icon"]');
+      if (pv) pv.innerHTML = iconHTML(this.value, 'book');
+    });
+  }
+
+  function close() {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+  }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  document.addEventListener('keydown', onKey);
+
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+  overlay.querySelector('[data-close]').addEventListener('click', close);
+  overlay.querySelector('.edit-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    var values = {};
+    opts.fields.forEach(function (f) {
+      var el = overlay.querySelector('[data-key="' + f.key + '"]');
+      values[f.key] = el ? el.value : '';
+    });
+    close();
+    opts.onSave(values);
+  });
+
+  var first = overlay.querySelector('input, select');
+  if (first) first.focus();
+}
+
+/* ============ نسخ العناصر ============ */
+function duplicateLesson(id) {
+  var l = getLesson(data, id);
+  if (!l) return;
+  var maxOrder = lessonsOf(data, l.unitId).reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0);
+  data.lessons.push({ id: uid('l'), unitId: l.unitId, title: l.title + ' (نسخة)', order: maxOrder + 1 });
+  save();
+}
+
+function duplicateUnit(id) {
+  var u = getUnit(data, id);
+  if (!u) return;
+  var nid = uid('u');
+  var maxOrder = unitsOf(data, u.subjectId).reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0);
+  data.units.push({ id: nid, subjectId: u.subjectId, title: u.title + ' (نسخة)', order: maxOrder + 1 });
+  /* ننسخ الدروس أيضاً (بدون محتواها) */
+  lessonsOf(data, id).forEach(function (l) {
+    data.lessons.push({ id: uid('l'), unitId: nid, title: l.title, order: l.order });
+  });
+  save();
+}
+
 /* ============ عرض اللوحات ============ */
 function renderPanel() {
   var p = $('#panel');
@@ -268,11 +374,11 @@ function renderSubjectsPanel(p) {
 
   p.innerHTML =
     '<h2>' + svgIcon('book') + ' إدارة المواد</h2>' +
-    '<p class="hint">أضف مواد جديدة — الأيقونة تكون <b>صورة عبر رابط</b> أو <b>اسم أيقونة SVG</b>، ويمكنك تغيير أيقونة أي مادة بزر الصورة.</p>' +
+    '<p class="hint">أضف مواد جديدة — وعدّل كل شيء (الاسم والأيقونة واللون) بزر التعديل، ورتّب بالأسهم، وانسخ الوحدات والدروس بزر النسخ.</p>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<input class="inp" id="nsName" placeholder="اسم المادة (مثال: الرياضيات)">' +
-        '<input class="inp" id="nsIcon" dir="ltr" placeholder="رابط صورة الأيقونة https://... (أو إيموجي)" style="flex:2 1 240px">' +
+        '<input class="inp" id="nsIcon" dir="ltr" placeholder="رابط صورة أو اسم أيقونة SVG (مثال: math)" style="flex:2 1 240px">' +
         '<div class="icon-preview" id="nsIconPreview">' + svgIcon('book') + '</div>' +
         '<select class="inp" id="nsColor">' + SUBJECT_COLORS.map(function (c) { return '<option>' + c + '</option>'; }).join('') + '</select>' +
         '<button class="btn btn-primary" id="nsAdd">' + svgIcon('plus') + ' إضافة مادة</button>' +
@@ -285,7 +391,7 @@ function renderSubjectsPanel(p) {
           '<div class="item-ico">' + iconHTML(s.icon, 'book') + '</div>' +
           '<div class="item-info"><div class="item-title">' + escapeHtml(s.name) + '</div>' +
           '<div class="item-sub">' + units.length + ' وحدة · ' + units.reduce(function (n, u) { return n + lessonsOf(data, u.id).length; }, 0) + ' درس</div></div>' +
-          actsHTML(s.id, '<button class="icon-btn" data-act="editicon" data-id="' + s.id + '" title="تغيير الأيقونة (رابط صورة أو اسم أيقونة)">' + svgIcon('image') + '</button>') +
+          actsHTML(s.id) +
         '</div>';
       }).join('') : '<div class="empty">لا توجد مواد — أضف أول مادة أعلاه</div>') +
     '</div>';
@@ -311,15 +417,20 @@ function renderSubjectsPanel(p) {
     down: function (id) { moveItem(data.subjects, id, 1); renderPanel(); },
     rename: function (id) {
       var s = getSubject(data, id);
-      var nn = prompt('الاسم الجديد للمادة:', s.name);
-      if (nn && nn.trim()) { s.name = nn.trim(); save(); renderPanel(); }
-    },
-    editicon: function (id) {
-      var s = getSubject(data, id);
-      var v = prompt('أيقونة المادة "' + s.name + '"\nالصق رابط الصورة أو اسم أيقونة SVG (مثال: math، atom، book):', s.icon || '');
-      if (v === null) return; /* أُلغي */
-      s.icon = v.trim() || 'book';
-      save(); renderPanel(); toast('تم تحديث الأيقونة');
+      openEditDialog({
+        title: 'تعديل المادة', icon: 'book',
+        fields: [
+          { key: 'name', label: 'اسم المادة', value: s.name, placeholder: 'مثال: الرياضيات' },
+          { key: 'icon', label: 'الأيقونة — اسم SVG أو رابط صورة', type: 'icon', value: s.icon || '', placeholder: 'مثال: math أو https://...' },
+          { key: 'color', label: 'اللون', type: 'select', value: s.color, options: colorOptions() }
+        ],
+        onSave: function (v) {
+          s.name = v.name.trim() || s.name;
+          s.icon = v.icon.trim() || 'book';
+          s.color = v.color || 'indigo';
+          save(); renderPanel(); toast('تم حفظ تعديلات المادة');
+        }
+      });
     },
     del: function (id) {
       var s = getSubject(data, id);
@@ -354,7 +465,7 @@ function renderUnitsPanel(p) {
           '<div class="item-ico">' + (i + 1) + '</div>' +
           '<div class="item-info"><div class="item-title">' + escapeHtml(u.title) + '</div>' +
           '<div class="item-sub">' + ls.length + ' درس</div></div>' +
-          actsHTML(u.id) +
+          actsHTML(u.id, '<button class="icon-btn" data-act="copy" data-id="' + u.id + '" title="إنشاء نسخة (مع دروسها)">' + svgIcon('copy') + '</button>') +
         '</div>';
       }).join('') : '<div class="empty">لا توجد وحدات في هذه المادة — أضف وحدة أعلاه</div>') +
     '</div>';
@@ -377,8 +488,30 @@ function renderUnitsPanel(p) {
     down: function (id) { moveItem(data.units.filter(function (u) { return u.subjectId === sel.subject; }), id, 1); renderPanel(); },
     rename: function (id) {
       var u = getUnit(data, id);
-      var nn = prompt('العنوان الجديد للوحدة:', u.title);
-      if (nn && nn.trim()) { u.title = nn.trim(); save(); renderPanel(); }
+      openEditDialog({
+        title: 'تعديل الوحدة', icon: 'layers',
+        fields: [
+          { key: 'title', label: 'عنوان الوحدة', value: u.title },
+          { key: 'subject', label: 'المادة (لنقل الوحدة إليها)', type: 'select', value: u.subjectId,
+            options: data.subjects.slice().sort(byOrder).map(function (s) { return { value: s.id, label: s.name }; }) }
+        ],
+        onSave: function (v) {
+          u.title = v.title.trim() || u.title;
+          var target = getSubject(data, v.subject);
+          if (target && target.id !== u.subjectId) {
+            u.subjectId = target.id;
+            sel.subject = target.id; sel.unit = ''; sel.lesson = '';
+          }
+          save(); renderPanel(); toast('تم حفظ تعديلات الوحدة');
+        }
+      });
+    },
+    copy: function (id) {
+      var u = getUnit(data, id);
+      if (confirm('إنشاء نسخة من وحدة "' + u.title + '" مع دروسها (بدون فيديوهات وملفات)؟')) {
+        duplicateUnit(id);
+        renderPanel(); toast('تم إنشاء نسخة من الوحدة', 'info');
+      }
     },
     del: function (id) {
       var u = getUnit(data, id);
@@ -414,7 +547,8 @@ function renderLessonsPanel(p) {
           '<div class="item-ico">' + (i + 1) + '</div>' +
           '<div class="item-info"><div class="item-title">' + escapeHtml(l.title) + '</div>' +
           '<div class="item-sub">' + res.length + ' عنصر محتوى</div></div>' +
-          actsHTML(l.id, '<button class="icon-btn" data-act="goto" data-id="' + l.id + '" title="إدارة المحتوى">' + svgIcon('plus') + '</button>' +
+          actsHTML(l.id, '<button class="icon-btn" data-act="copy" data-id="' + l.id + '" title="إنشاء نسخة">' + svgIcon('copy') + '</button>' +
+                         '<button class="icon-btn" data-act="goto" data-id="' + l.id + '" title="إدارة المحتوى">' + svgIcon('plus') + '</button>' +
                          '<button class="icon-btn" data-act="view" data-id="' + l.id + '" title="معاينة الدرس">' + svgIcon('eye') + '</button>') +
         '</div>';
       }).join('') : '<div class="empty">لا توجد دروس في هذه الوحدة — أضف درساً أعلاه</div>') +
@@ -444,8 +578,32 @@ function renderLessonsPanel(p) {
     down: function (id) { moveItem(data.lessons.filter(function (l) { return l.unitId === sel.unit; }), id, 1); renderPanel(); },
     rename: function (id) {
       var l = getLesson(data, id);
-      var nn = prompt('العنوان الجديد للدرس:', l.title);
-      if (nn && nn.trim()) { l.title = nn.trim(); save(); renderPanel(); }
+      var unitOpts = [];
+      data.subjects.slice().sort(byOrder).forEach(function (s) {
+        unitsOf(data, s.id).forEach(function (u) {
+          unitOpts.push({ value: u.id, label: s.name + ' — ' + u.title });
+        });
+      });
+      openEditDialog({
+        title: 'تعديل الدرس', icon: 'film',
+        fields: [
+          { key: 'title', label: 'عنوان الدرس', value: l.title },
+          { key: 'unit', label: 'الوحدة (لنقل الدرس إليها)', type: 'select', value: l.unitId, options: unitOpts }
+        ],
+        onSave: function (v) {
+          l.title = v.title.trim() || l.title;
+          var targetUnit = getUnit(data, v.unit);
+          if (targetUnit && targetUnit.id !== l.unitId) {
+            l.unitId = targetUnit.id;
+            sel.subject = targetUnit.subjectId; sel.unit = targetUnit.id; sel.lesson = l.id;
+          }
+          save(); renderPanel(); toast('تم حفظ تعديلات الدرس');
+        }
+      });
+    },
+    copy: function (id) {
+      duplicateLesson(id);
+      renderPanel(); toast('تم إنشاء نسخة من الدرس (بدون محتوى)', 'info');
     },
     del: function (id) {
       var l = getLesson(data, id);
@@ -534,8 +692,28 @@ function renderResourceSections(area, lesson) {
       down: function (id) { moveItem(resourcesOf(data, lesson.id, kind), id, 1); renderResourceSections(area, lesson); },
       rename: function (id) {
         var r = data.resources.find(function (x) { return x.id === id; });
-        var nn = prompt('العنوان الجديد:', r.title);
-        if (nn && nn.trim()) { r.title = nn.trim(); save(); renderResourceSections(area, lesson); }
+        var fields = [
+          { key: 'title', label: 'العنوان', value: r.title || '', placeholder: 'مثال: الجزء الأول' },
+          { key: 'url', label: 'الرابط', value: r.url, dir: 'ltr', placeholder: 'https://... أو اتركه كما هو للملفات المرفوعة' }
+        ];
+        if (r.kind === 'exercise') {
+          fields.push({ key: 'type', label: 'نوع التمرين', type: 'select', value: r.exerciseType || 'pdf',
+            options: [
+              { value: 'pdf', label: 'ملف PDF' },
+              { value: 'video', label: 'فيديو (يُشغَّل في المشغل)' },
+              { value: 'link', label: 'رابط موقع' }
+            ] });
+        }
+        openEditDialog({
+          title: 'تعديل ' + KIND_META[r.kind].label, icon: KIND_META[r.kind].icon,
+          fields: fields,
+          onSave: function (v) {
+            if (v.title.trim()) r.title = v.title.trim();
+            if (v.url.trim()) r.url = v.url.trim();
+            if (r.kind === 'exercise') r.exerciseType = v.type;
+            save(); renderResourceSections(area, lesson); toast('تم حفظ التعديلات');
+          }
+        });
       },
       del: function (id) {
         var r = data.resources.find(function (x) { return x.id === id; });

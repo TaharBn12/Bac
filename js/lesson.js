@@ -331,11 +331,10 @@ function initLessonPage() {
         card.className = 'pdf-card';
         card.innerHTML =
           '<div class="pdf-ico">' + svgIcon('file') + '</div>' +
-          '<div><div class="t">' + escapeHtml(p.title || 'ملف PDF') + '</div>' +
-          '<div class="m">' + escapeHtml(res.fileName || 'ملف') + '</div></div>' +
+          '<div class="t">' + escapeHtml(p.title || 'ملف PDF') + '</div>' +
           '<div class="acts">' +
-            '<a class="btn btn-sm" target="_blank" rel="noopener" href="' + escapeHtml(res.src) + '">' + svgIcon('eye') + ' عرض</a>' +
-            '<a class="btn btn-sm" download="' + escapeHtml(res.fileName || 'file.pdf') + '" href="' + escapeHtml(res.src) + '" title="تنزيل">' + svgIcon('download') + '</a>' +
+            '<a class="btn btn-icon" target="_blank" rel="noopener" href="' + escapeHtml(res.src) + '" title="عرض الملخص" aria-label="عرض الملخص">' + svgIcon('eye') + '</a>' +
+            '<a class="btn btn-icon" download="' + escapeHtml(res.fileName || 'file.pdf') + '" href="' + escapeHtml(res.src) + '" title="تنزيل الملخص" aria-label="تنزيل الملخص">' + svgIcon('download') + '</a>' +
           '</div>';
         pdfEl.appendChild(card);
       });

@@ -54,6 +54,7 @@
     'upload': S('<path d="M20.5 15v3.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V15"/><path d="m7 8 5-5 5 5"/><path d="M12 3v12"/>'),
     'external': S('<path d="M18 13.5V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h5.5"/><path d="M14.5 3H21v6.5"/><path d="M10 14 21 3"/>'),
     'refresh': S('<path d="M21 4v5h-5"/><path d="M3 20v-5h5"/><path d="M4.5 9a8.5 8.5 0 0 1 14-3.5L21 9"/><path d="m3 15 2.5 3.5A8.5 8.5 0 0 0 19.5 15"/>'),
+    'copy': S('<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>'),
     'save': S('<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8"/><path d="M7 3v5h8"/>'),
     'folder': S('<path d="M21.5 19a2 2 0 0 1-2 2h-15a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.5l2 3h7.5a2 2 0 0 1 2 2z"/>'),
 

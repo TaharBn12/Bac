@@ -202,6 +202,36 @@ button { font-family: inherit; }
 .c-sky     { --sc: linear-gradient(135deg, #0ea5e9, #38bdf8); }
 .c-rose    { --sc: linear-gradient(135deg, #f43f5e, #fb7185); }
 .c-emerald { --sc: linear-gradient(135deg, #10b981, #34d399); }
+.c-orange  { --sc: linear-gradient(135deg, #f97316, #fb923c); }
+.c-cyan    { --sc: linear-gradient(135deg, #06b6d4, #22d3ee); }
+.c-lime    { --sc: linear-gradient(135deg, #84cc16, #a3e635); }
+.c-pink    { --sc: linear-gradient(135deg, #ec4899, #f472b6); }
+.c-violet  { --sc: linear-gradient(135deg, #8b5cf6, #a78bfa); }
+.c-slate   { --sc: linear-gradient(135deg, #64748b, #94a3b8); }
+
+/* ============ نافذة التعديل ============ */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 250; display: grid; place-items: center;
+  background: rgba(5, 7, 20, 0.72); backdrop-filter: blur(5px);
+  padding: 18px; animation: fadeUp 0.2s ease both;
+}
+.modal {
+  width: min(480px, 100%); max-height: 88vh; overflow-y: auto;
+  background: var(--bg-2); border: 1px solid var(--border);
+  border-radius: 18px; padding: 22px; box-shadow: var(--shadow);
+}
+.modal h3 { font-size: 17px; font-weight: 900; margin-bottom: 18px; display: flex; align-items: center; gap: 9px; }
+.modal h3 .ic { width: 19px; height: 19px; color: var(--accent); }
+.modal .field { text-align: start; display: block; margin-bottom: 14px; }
+.modal .field > span { display: block; font-size: 13px; font-weight: 800; color: var(--muted); margin-bottom: 6px; }
+.modal .acts { display: flex; gap: 10px; margin-top: 20px; }
+.modal .acts .btn { flex: 1; }
+
+/* حقل الأيقونة: إدخال + معاينة مباشرة */
+.icon-field { display: flex; gap: 10px; align-items: center; }
+.icon-field .inp { flex: 1; min-width: 0; }
+.icon-field .icon-preview { width: 42px; height: 42px; font-size: 21px; }
+.icon-field .icon-preview .ic { width: 23px; height: 23px; }
 
 /* ============ مسار التنقل ============ */
 .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 18px 0 0; font-size: 14px; color: var(--muted); }
@@ -380,9 +410,16 @@ input[type='range'].vp-range::-moz-range-thumb {
   display: grid; place-items: center; font-size: 21px;
   background: linear-gradient(135deg, #ef4444, #f97316);
 }
-.pdf-card .t { font-size: 14.5px; font-weight: 800; word-break: break-word; }
-.pdf-card .m { font-size: 12px; color: var(--muted); }
-.pdf-card .acts { display: flex; gap: 6px; margin-inline-start: auto; }
+.pdf-ico .ic { width: 22px; height: 22px; }
+.pdf-card .t { font-size: 14.5px; font-weight: 800; word-break: break-word; flex: 1; min-width: 0; }
+.pdf-card .acts { display: flex; gap: 7px; flex: 0 0 auto; }
+
+/* زر أيقوني مربع (عرض / تنزيل) */
+.btn-icon {
+  width: 40px; height: 40px; padding: 0; border-radius: 10px;
+  display: inline-grid; place-items: center;
+}
+.btn-icon .ic { width: 18px; height: 18px; }
 
 .img-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-top: 16px; }
 .img-thumb {
@@ -556,6 +593,45 @@ select.inp option[value=''] { color: var(--muted); }
 }
 .admin-entry .ic { width: 15px; height: 15px; }
 .admin-entry:hover { opacity: 0.8; border-color: var(--border); background: rgba(255, 255, 255, 0.05); }
+
+/* ============ تجاوب الهاتف (تحسينات إضافية) ============ */
+@media (max-width: 640px) {
+  /* أزرار التمارين: عمود واحد بملء العرض — هدف لمس مريح بإصبع واحد */
+  .ex-btns { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .ex-btn { width: 100%; min-height: 48px; justify-content: center; padding: 12px 16px; }
+
+  /* مشغل الفيديو: ضغط عناصر التحكم لتناسب الشاشة الصغيرة */
+  .vp-controls { padding: 18px 6px 6px; }
+  .vp-btn { width: 34px; height: 34px; }
+  .vp-btn .ic { width: 17px; height: 17px; }
+  .vp-vol input { display: none; } /* زر كتم يكفي على الهاتف */
+  .vp-time { font-size: 11.5px; }
+  .vp-speed { font-size: 11px; padding: 3px; }
+  .vp-bigplay { width: 68px; height: 68px; }
+  .vp-bigplay .ic { width: 30px; height: 30px; }
+  .vp-progress { height: 26px; } /* شريط تقدم أسمك أسهل للسحب */
+  .vp-now { font-size: 12.5px; bottom: 78px; }
+
+  /* تبويبات الفيديو: تمرير أفقي بدل الالتفاف */
+  .video-tabs { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 6px; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+  .vtab { white-space: nowrap; flex: 0 0 auto; }
+
+  /* أزرار أكبر للمس: بطاقات PDF وعارض الصور */
+  .btn-icon { width: 44px; height: 44px; }
+  .lb-btn { width: 52px; height: 52px; }
+
+  .lesson-title { font-size: 19px; }
+  .lesson-section > h2 { font-size: 16.5px; }
+  .lesson-section > h2 .ic { width: 17px; height: 17px; }
+  .crumbs { font-size: 12.5px; }
+  .top-actions .btn-sm { padding: 7px 11px; font-size: 12.5px; }
+}
+
+/* الأجهزة اللوحية: أزرار التمارين تتوزع على صفين متوازنين */
+@media (min-width: 641px) and (max-width: 1024px) {
+  .ex-btn { flex: 1 1 220px; }
+  .lesson-wrap { max-width: 820px; }
+}
 
 /* ============ حالة السحابة ============ */
 .cloud-badge {
