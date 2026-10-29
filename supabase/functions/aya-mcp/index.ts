@@ -3,8 +3,8 @@
 // ------------------------------------------------------------
 // يدعم في نقطة واحدة:
 //   1) خادم Remote MCP متوافق مع Claude.ai و Claude Desktop (Streamable HTTP JSON-RPC 2.0)
-//   2) استخراج قوائم تشغيل وفيديوهات يوتيوب وتقسيمها ذكياً (المادة ← الوحدة ← الدرس ← فيديو/تمرين)
-//   3) نقاط REST مساندة للوحة التحكم (/api/playlist, /api/ai-organize, /api/ai-chat)
+//   2) استخراج قوائم تشغيل وفيديوهات يوتيوب وتقسيمها ذكياً (المادة ← الوحدة ← الدرس/التمرين)
+//   3) المجموعات الديناميكية للموارد (عنوان + صورة/فيديو/PDF أو عدة عناصر تحت نفس العنوان)
 //   4) حماية صارمة عبر سياسات RLS وترويسة x-admin-key على الجداول الأربعة فقط
 // ============================================================
 
@@ -51,6 +51,8 @@ interface ResourceRow {
   url: string;
   size: number | null;
   exercise_type: string | null;
+  group_id?: string | null;
+  group_title?: string | null;
   sort_order: number;
 }
 interface SiteData {
@@ -83,7 +85,6 @@ interface ExtractedPlaylist {
   videos: PlaylistVideoItem[];
 }
 
-/* ============ أدوات مساعدة عامة ============ */
 function uid(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
 }
@@ -112,24 +113,20 @@ function decodeBase64UrlUtf8(input: string): string {
   }
 }
 
-/* استخراج المسار الفرعي ومفتاح الإدارة من الرابط أو الترويسات */
 function parseRequestAuthAndRoute(req: Request): { subPath: string; adminKey: string } {
   const url = new URL(req.url);
   let path = url.pathname;
 
-  // إزالة البادئة /functions/v1/aya-mcp أو /aya-mcp
   path = path.replace(/^\/functions\/v1\/aya-mcp\b/, "").replace(/^\/aya-mcp\b/, "");
   if (!path.startsWith("/")) path = "/" + path;
 
   let adminKey = "";
 
-  // 1) مفتاح مشفر بـ Base64URL داخل المسار: /k/<b64url>/...
   const b64Match = path.match(/^\/k\/([A-Za-z0-9_-]+)(\/.*)?$/);
   if (b64Match) {
     adminKey = decodeBase64UrlUtf8(b64Match[1]);
     path = b64Match[2] || "/";
   } else {
-    // 2) مفتاح نصي مشفر داخل المسار: /key/<urlencoded>/...
     const keyMatch = path.match(/^\/key\/([^/]+)(\/.*)?$/);
     if (keyMatch) {
       try {
@@ -141,17 +138,14 @@ function parseRequestAuthAndRoute(req: Request): { subPath: string; adminKey: st
     }
   }
 
-  // 3) معامل الاستعلام ?key=... أو ?token=...
   if (!adminKey) {
     adminKey = url.searchParams.get("key") || url.searchParams.get("token") || "";
   }
 
-  // 4) ترويسة x-admin-key
   if (!adminKey) {
     adminKey = req.headers.get("x-admin-key") || "";
   }
 
-  // 5) ترويسة Authorization: Bearer <key> (إن لم تكن المفتاح العام لـ Supabase)
   if (!adminKey) {
     const auth = req.headers.get("authorization") || "";
     const m = auth.match(/^Bearer\s+(.+)$/i);
@@ -163,7 +157,6 @@ function parseRequestAuthAndRoute(req: Request): { subPath: string; adminKey: st
   return { subPath: path || "/", adminKey };
 }
 
-/* ============ طبقة قاعدة البيانات الآمنة (PostgREST + RLS) ============ */
 function assertAllowedTable(table: string): asserts table is AllowedTable {
   if (!ALLOWED_TABLES.has(table)) {
     throw new Error(`جدول غير مسموح به: ${table}`);
@@ -267,7 +260,6 @@ async function dbUpdate<T extends Record<string, unknown>>(
 
   const rows = (await res.json()) as T[];
   if (!rows.length) {
-    // التحقق إن كان العنصر موجوداً أصلاً أم أن RLS منعت التعديل
     const chk = await fetch(
       `${SUPABASE_URL}/rest/v1/${table}?id=eq.${encodeURIComponent(id)}&select=id`,
       { headers: dbHeaders("") },
@@ -312,7 +304,6 @@ async function dbDelete(table: AllowedTable, id: string, adminKey: string): Prom
   }
 }
 
-/* ============ الذكاء اللغوي وتحليل مناهج البكالوريا الجزائرية ============ */
 function normAr(s: string): string {
   return String(s || "")
     .toLowerCase()
@@ -493,7 +484,6 @@ function detectSubjectFromText(corpus: string): {
   };
 }
 
-/* مطابقة اسم المادة مع المواد الموجودة فعلياً في قاعدة البيانات */
 function findMatchingSubject(subjects: SubjectRow[], nameOrId: string): SubjectRow | null {
   if (!nameOrId) return null;
   const raw = nameOrId.trim();
@@ -503,7 +493,6 @@ function findMatchingSubject(subjects: SubjectRow[], nameOrId: string): SubjectR
   const target = normArNoAl(raw);
   if (!target) return null;
 
-  // مطابقة مباشرة أو جزئية بدون (ال)
   for (const s of subjects) {
     const sn = normArNoAl(s.name);
     if (sn === target || (sn.length >= 4 && target.includes(sn)) || (target.length >= 4 && sn.includes(target))) {
@@ -511,7 +500,6 @@ function findMatchingSubject(subjects: SubjectRow[], nameOrId: string): SubjectR
     }
   }
 
-  // مطابقة مرادفات (مثل الفيزياء <-> العلوم الفيزيائية، الشريعة <-> العلوم الإسلامية)
   const detected = detectSubjectFromText(raw);
   if (detected) {
     const dn = normArNoAl(detected.name);
@@ -523,7 +511,6 @@ function findMatchingSubject(subjects: SubjectRow[], nameOrId: string): SubjectR
   return null;
 }
 
-/* تنظيف عنوان الفيديو وتحليله إلى (وحدة محتملة / عنوان الدرس / جزء / تمرين) */
 function analyzeVideoTitle(rawTitle: string): {
   cleaned_title: string;
   is_exercise_hint: boolean;
@@ -536,7 +523,6 @@ function analyzeVideoTitle(rawTitle: string): {
     .replace(/\s+/g, " ")
     .trim();
 
-  // إزالة الذيول الدعائية المعتادة في يوتيوب مع الحفاظ على محتوى العنوان
   cleaned = cleaned
     .replace(/\s*[|\-–—]\s*(?:بكالوريا|باك|bac)\s*20\d{2}[^|\-–—]*$/gi, "")
     .replace(/\s*\(\s*(?:بكالوريا|باك|bac)\s*20\d{2}[^)]*\)\s*$/gi, "")
@@ -544,14 +530,12 @@ function analyzeVideoTitle(rawTitle: string): {
     .trim();
   if (!cleaned) cleaned = String(rawTitle || "فيديو").trim();
 
-  // اكتشاف إن كان الفيديو تمريناً أو حل موضوع بكالوريا
   const norm = normAr(cleaned);
   const isExercise =
     /(?:^|\s)(?:تمرين|تمارين|تطبيق|تطبيقات|سلسله تمارين|حل تمرين|حلول تمارين|حل موضوع|حل بكالوريا|موضوع مقترح|مواضيع مقترحه|فرض|اختبار|exercice|exercices|sujet bac|corrig[eé])(?:\s|$|\d)/i.test(
       norm,
     ) && !/(?:^|\s)(?:ملخص شامل|شرح الدرس)(?:\s|$)/.test(norm);
 
-  // اكتشاف إشارة الوحدة من داخل العنوان مثل: "الوحدة 01: ..." أو "المجال الأول - ..."
   let unitHint: string | null = null;
   const unitRegex =
     /(?:^|[|\-–—()])\s*((?:الوحدة|الوحده|المجال(?:\s+التعلمي)?|المحور|Chapitre|Unit)\s*(?:رقم\s*)?(?:\d+|الأولى|الاولى|الأول|الاول|الثانية|الثانيه|الثاني|الثالثة|الثالثه|الثالث|الرابعة|الرابعه|الرابع|الخامسة|الخامسه|الخامس|السادسة|السادسه|السادس)(?:\s*[:\-–]\s*[^|\-–—()]{2,38})?)/i;
@@ -560,7 +544,6 @@ function analyzeVideoTitle(rawTitle: string): {
     unitHint = um[1].trim();
   }
 
-  // فصل رقم الجزء مثل: (الجزء 1)، الجزء الثاني، ج1، Part 2، 1/3
   let partLabel: string | null = null;
   let baseTitle = cleaned;
 
@@ -587,12 +570,10 @@ function analyzeVideoTitle(rawTitle: string): {
   };
 }
 
-/* ============ استخراج قوائم تشغيل وفيديوهات يوتيوب (متعدد الطبقات بدون مفتاح خارجي) ============ */
 function parseYouTubeIdentifiers(input: string): { playlistId: string | null; videoId: string | null } {
   const raw = String(input || "").trim();
   if (!raw) return { playlistId: null, videoId: null };
 
-  // إذا أرسل معرف القائمة مباشرة مثل PL... أو OLAK5uy_...
   if (/^(PL|OLAK5uy_|UU|FL|RD|VL)[A-Za-z0-9_-]{8,}$/.test(raw)) {
     return {
       playlistId: raw.startsWith("VL") ? raw.slice(2) : raw,
@@ -649,7 +630,6 @@ function extractFromInnerTubeTree(
 
   const obj = root as Record<string, unknown>;
 
-  // استخراج عنوان القائمة وصاحب القناة
   if (!meta.title && obj.playlistMetadataRenderer && typeof obj.playlistMetadataRenderer === "object") {
     const pm = obj.playlistMetadataRenderer as Record<string, unknown>;
     if (typeof pm.title === "string" && pm.title.trim()) meta.title = pm.title.trim();
@@ -668,7 +648,6 @@ function extractFromInnerTubeTree(
     }
   }
 
-  // استخراج عناصر الفيديو القياسية في القائمة
   if (obj.playlistVideoRenderer && typeof obj.playlistVideoRenderer === "object") {
     const pv = obj.playlistVideoRenderer as Record<string, any>;
     const vid = typeof pv.videoId === "string" ? pv.videoId : "";
@@ -697,7 +676,6 @@ function extractFromInnerTubeTree(
     return;
   }
 
-  // دعم قوائم الدورات التعليمية الحديثة (RichGrid / LockupViewModel)
   if (obj.lockupViewModel && typeof obj.lockupViewModel === "object") {
     const lv = obj.lockupViewModel as Record<string, any>;
     const vid = typeof lv.contentId === "string" && lv.contentId.length === 11 ? lv.contentId : "";
@@ -714,7 +692,6 @@ function extractFromInnerTubeTree(
     }
   }
 
-  // استخراج رمز الصفحة التالية (Continuation Token) للقوائم الطويلة (+100 فيديو)
   if (obj.continuationItemRenderer && typeof obj.continuationItemRenderer === "object") {
     const ci = obj.continuationItemRenderer as Record<string, any>;
     const token =
@@ -755,7 +732,6 @@ async function fetchYouTubePlaylistViaInnerTube(
   const rawVideos: Array<{ videoId: string; title: string; duration: string; author: string }> = [];
   const meta: { title?: string; author?: string } = {};
 
-  // الطلب الأول: browseId = VL + playlistId
   const browseId = playlistId.startsWith("VL") ? playlistId : `VL${playlistId}`;
   const firstRes = await fetch("https://www.youtube.com/youtubei/v1/browse?prettyPrint=false", {
     method: "POST",
@@ -769,7 +745,6 @@ async function fetchYouTubePlaylistViaInnerTube(
     extractFromInnerTubeTree(data, seen, rawVideos, nextTokens, meta);
   }
 
-  // جلب الصفحات الإضافية إن وُجدت حتى maxVideos
   let pageGuard = 0;
   while (nextTokens.length > 0 && rawVideos.length < maxVideos && pageGuard < 5) {
     pageGuard++;
@@ -785,7 +760,6 @@ async function fetchYouTubePlaylistViaInnerTube(
     extractFromInnerTubeTree(contData, seen, rawVideos, nextTokens, meta);
   }
 
-  // احتياط 2: قراءة صفحة HTML للقائمة إن لم يرجع InnerTube نتائج
   if (rawVideos.length === 0) {
     const htmlRes = await fetch(`https://www.youtube.com/playlist?list=${encodeURIComponent(playlistId)}&hl=ar`, {
       headers: {
@@ -802,13 +776,12 @@ async function fetchYouTubePlaylistViaInnerTube(
           const parsed = JSON.parse(m[1]);
           extractFromInnerTubeTree(parsed, seen, rawVideos, [], meta);
         } catch {
-          // الانتقال إلى الاحتياط الثالث
+          // fallback
         }
       }
     }
   }
 
-  // احتياط 3: خلاصة Atom XML الرسمية من يوتيوب
   if (rawVideos.length === 0) {
     const xmlRes = await fetch(
       `https://www.youtube.com/feeds/videos.xml?playlist_id=${encodeURIComponent(playlistId)}`,
@@ -863,7 +836,6 @@ async function extractYouTubePlaylistOrVideo(urlInput: string, maxVideos = 200):
     );
   }
 
-  // حالة رابط فيديو مفرد بدون قائمة تشغيل
   if (!playlistId && videoId) {
     const watchUrl = `https://www.youtube.com/watch?v=${videoId}`;
     let title = "درس فيديو";
@@ -902,7 +874,6 @@ async function extractYouTubePlaylistOrVideo(urlInput: string, maxVideos = 200):
     };
   }
 
-  // حالة قائمة تشغيل كاملة
   const pl = await fetchYouTubePlaylistViaInnerTube(playlistId!, Math.min(Math.max(maxVideos, 1), 400));
   if (!pl.videos.length) {
     throw new Error(
@@ -940,11 +911,12 @@ async function extractYouTubePlaylistOrVideo(urlInput: string, maxVideos = 200):
   };
 }
 
-/* ============ منظم المناهج الذكي وبناء خطة الإضافة (المادة ← الوحدة ← الدرس) ============ */
 interface PlanResourceInput {
   title: string;
   url: string;
   exercise_type?: "video" | "pdf" | "image" | "link";
+  group_id?: string;
+  group_title?: string;
 }
 interface PlanLessonInput {
   id?: string;
@@ -984,7 +956,6 @@ function buildSmartCurriculumPlan(
   const grouping = opts.groupingMode || "smart";
   const separateExercises = opts.separateExercises !== false;
 
-  // 1) تحديد المادة
   let subjectEntry: CurriculumPlan["subject"];
   const requestedSubj = (opts.subjectNameOrId || "").trim();
   const matchedSubj = requestedSubj
@@ -1020,11 +991,9 @@ function buildSmartCurriculumPlan(
       : { name: "مادة عامة", icon: "book", color: "indigo" };
   }
 
-  // تنظيف عنوان القائمة ليكون عنوان وحدة افتراضياً مناسباً
   const defaultUnitTitle =
     analyzeVideoTitle(playlist.title).cleaned_title || playlist.title || "وحدة دراسية";
 
-  // التحقق من وحدة موجودة إن طلب المستخدم معرفاً أو اسماً
   const existingUnits = subjectEntry.id
     ? siteData.units.filter((u) => u.subject_id === subjectEntry.id)
     : [];
@@ -1038,7 +1007,6 @@ function buildSmartCurriculumPlan(
     else fixedUnit = { title: rawU };
   }
 
-  // نمط درس واحد يجمع كل الفيديوهات
   if (grouping === "single_lesson") {
     const targetUnit = fixedUnit || { title: defaultUnitTitle };
     const videos: PlanResourceInput[] = [];
@@ -1068,7 +1036,6 @@ function buildSmartCurriculumPlan(
     };
   }
 
-  // تجميع الفيديوهات حسب الوحدات والدروس
   const unitsMap = new Map<string, PlanUnitInput>();
   const getOrCreateUnit = (unitTitle: string, unitId?: string): PlanUnitInput => {
     const key = unitId || normArNoAl(unitTitle) || "default";
@@ -1095,7 +1062,6 @@ function buildSmartCurriculumPlan(
     }
     const unitObj = getOrCreateUnit(currentUnitTitle, fixedUnit?.id);
 
-    // نمط استيراد كل فيديو كتمرين مستقل داخل قسم «تمارين الوحدة»
     if (grouping === "unit_exercises") {
       unitObj.lessons.push({
         title: v.cleaned_title,
@@ -1106,7 +1072,6 @@ function buildSmartCurriculumPlan(
       continue;
     }
 
-    // إذا كان الفيديو تمريناً ومطلوب فصل التمارين: نربطه بالدرس السابق أو ننشئ درس تمارين
     if (separateExercises && v.is_exercise_hint && grouping === "smart") {
       if (!lastLesson || !unitObj.lessons.includes(lastLesson)) {
         let exLesson = unitObj.lessons.find((l) => l.title === "تمارين وتطبيقات شاملة");
@@ -1157,12 +1122,10 @@ function buildSmartCurriculumPlan(
   };
 }
 
-/* تنفيذ خطة إضافة منهج كامل في قاعدة بيانات Supabase دفعة واحدة */
 async function executeCurriculumPlan(plan: CurriculumPlan, adminKey: string) {
   const siteData = await dbSelectAll();
   const skipDuplicates = plan.skip_duplicate_urls !== false;
 
-  // 1) إيجاد أو إنشاء المادة
   let subject =
     (plan.subject.id ? siteData.subjects.find((s) => s.id === plan.subject.id) : null) ||
     findMatchingSubject(siteData.subjects, plan.subject.name);
@@ -1279,14 +1242,17 @@ async function executeCurriculumPlan(plan: CurriculumPlan, adminKey: string) {
         existingUrls.add(cleanUrl);
         const ord = (nextOrderByLesson.get(lesson!.id) || 0) + 1;
         nextOrderByLesson.set(lesson!.id, ord);
+        const rTitle = (item.title || lesson!.title || "محتوى").trim();
         resourcesToUpsert.push({
           id: uid("r"),
           lesson_id: lesson!.id,
           kind,
-          title: (item.title || lesson!.title || "محتوى").trim(),
+          title: rTitle,
           url: cleanUrl,
           size: null,
           exercise_type: kind === "exercise" ? item.exercise_type || "video" : null,
+          group_id: item.group_id || null,
+          group_title: item.group_title || null,
           sort_order: ord,
         });
         if (kind === "video") addedVideosCount++;
@@ -1301,7 +1267,6 @@ async function executeCurriculumPlan(plan: CurriculumPlan, adminKey: string) {
     }
   }
 
-  // كتابة الوحدات ثم الدروس ثم الموارد بالترتيب لضمان سلامة المفاتيح الأجنبية (Foreign Keys)
   if (unitsToUpsert.length) await dbUpsert("units", unitsToUpsert, adminKey);
   if (lessonsToUpsert.length) await dbUpsert("lessons", lessonsToUpsert, adminKey);
   if (resourcesToUpsert.length) await dbUpsert("resources", resourcesToUpsert, adminKey);
@@ -1326,12 +1291,11 @@ async function executeCurriculumPlan(plan: CurriculumPlan, adminKey: string) {
   };
 }
 
-/* ============ تعريف أدوات MCP لـ Claude (claude.ai & Claude Desktop) ============ */
 const MCP_TOOLS = [
   {
     name: "get_site_structure",
     description:
-      "جلب الهيكل الكامل لموقع آية باك 2027 (المواد الدراسية، الوحدات، الدروس، وإحصائيات أو تفاصيل الفيديوهات والملفات والتمارين). استدعِ هذه الأداة أولاً للتعرف على معرفات المواد والوحدات والدروس الموجودة.",
+      "جلب الهيكل الكامل لموقع آية باك 2027 (المواد الدراسية، الوحدات، الدروس، تمارين الوحدات، وإحصائيات أو تفاصيل الفيديوهات والملفات والتمارين).",
     inputSchema: {
       type: "object",
       properties: {
@@ -1341,7 +1305,7 @@ const MCP_TOOLS = [
         },
         include_resources: {
           type: "boolean",
-          description: "إرجاع تفاصيل روابط الفيديوهات والملفات والتمارين داخل كل درس (افتراضي: false لتقليل الحجم، ضعها true عند الحاجة).",
+          description: "إرجاع تفاصيل روابط الفيديوهات والملفات والتمارين داخل كل درس أو تمرين.",
         },
       },
     },
@@ -1349,13 +1313,13 @@ const MCP_TOOLS = [
   {
     name: "fetch_youtube_playlist",
     description:
-      "استخراج جميع فيديوهات قائمة تشغيل يوتيوب (YouTube Playlist) أو فيديو يوتيوب من الرابط، مع العناوين والروابط والمدة وتلميحات ذكية للمادة والوحدة وفصل التمارين عن الدروس. استخدمها قبل تنظيم القائمة في الموقع.",
+      "استخراج جميع فيديوهات قائمة تشغيل يوتيوب أو فيديو يوتيوب من الرابط مع تلميحات ذكية للمادة والوحدة وفصل التمارين عن الدروس.",
     inputSchema: {
       type: "object",
       properties: {
         url: {
           type: "string",
-          description: "رابط قائمة تشغيل يوتيوب (https://www.youtube.com/playlist?list=...) أو رابط فيديو.",
+          description: "رابط قائمة تشغيل يوتيوب أو رابط فيديو.",
         },
         max_videos: {
           type: "number",
@@ -1368,74 +1332,70 @@ const MCP_TOOLS = [
   {
     name: "apply_curriculum_plan",
     description:
-      "الأداة الرئيسية لإضافة أو دمج محتوى منظم (مثل قائمة تشغيل يوتيوب بعد تقسيمها بواسطة Claude) حسب المادة ← الوحدات ← الدروس ← (فيديوهات الدروس + التمارين + ملفات PDF). تطابق تلقائياً المواد والوحدات والدروس الموجودة أو تنشئ الجديد منها وتمنع تكرار الروابط.",
+      "إضافة أو دمج محتوى منظم حسب المادة ← الوحدات ← الدروس أو تمارين الوحدة ← (فيديوهات + التمارين + ملفات PDF + الصور).",
     inputSchema: {
       type: "object",
       properties: {
         subject: {
           type: "object",
-          description: "المادة المستهدفة (حدد id لمادة موجودة أو name لإنشاء/مطابقة مادة).",
           properties: {
-            id: { type: "string", description: "معرف المادة إن كانت موجودة (مثل s-math)." },
-            name: { type: "string", description: "اسم المادة بالعربية (مثل: الرياضيات، محاسبة، اقتصاد)." },
-            icon: { type: "string", description: "اسم أيقونة SVG اختياري (math, atom, dna, book-open, bulb, fr, gb, globe, mosque, chart, book)." },
-            color: { type: "string", description: "لون البطاقة اختياري (indigo, teal, green, amber, purple, blue, sky, rose, emerald)." },
+            id: { type: "string" },
+            name: { type: "string" },
+            icon: { type: "string" },
+            color: { type: "string" },
           },
           required: ["name"],
         },
         units: {
           type: "array",
-          description: "قائمة الوحدات الدراسية وبداخل كل وحدة دروسها.",
           items: {
             type: "object",
             properties: {
-              id: { type: "string", description: "معرف الوحدة إن كانت موجودة مسبقاً (اختياري)." },
-              title: { type: "string", description: "عنوان الوحدة الدراسية." },
+              id: { type: "string" },
+              title: { type: "string" },
               lessons: {
                 type: "array",
                 items: {
                   type: "object",
                   properties: {
-                    id: { type: "string", description: "معرف الدرس أو التمرين إن كان موجوداً مسبقاً (اختياري)." },
-                    title: { type: "string", description: "عنوان الدرس أو التمرين." },
-                    item_type: { type: "string", enum: ["lesson", "exercise"], description: "lesson = درس في قسم الدروس، exercise = تمرين مستقل في قسم تمارين الوحدة." },
+                    id: { type: "string" },
+                    title: { type: "string" },
+                    item_type: { type: "string", enum: ["lesson", "exercise"] },
                     videos: {
                       type: "array",
-                      description: "فيديوهات شرح الدرس.",
                       items: {
                         type: "object",
-                        properties: {
-                          title: { type: "string" },
-                          url: { type: "string" },
-                        },
+                        properties: { title: { type: "string" }, url: { type: "string" }, group_id: { type: "string" }, group_title: { type: "string" } },
                         required: ["title", "url"],
                       },
                     },
                     exercises: {
                       type: "array",
-                      description: "تمارين وتطبيقات الدرس (فيديو حل تمرين، أو ملف PDF، أو رابط).",
                       items: {
                         type: "object",
                         properties: {
                           title: { type: "string" },
                           url: { type: "string" },
-                          exercise_type: {
-                            type: "string",
-                            enum: ["video", "pdf", "link"],
-                          },
+                          exercise_type: { type: "string", enum: ["video", "pdf", "image", "link"] },
+                          group_id: { type: "string" },
+                          group_title: { type: "string" },
                         },
                         required: ["title", "url"],
                       },
                     },
                     pdfs: {
                       type: "array",
-                      description: "ملخصات وملفات PDF الخاصة بالدرس.",
                       items: {
                         type: "object",
-                        properties: {
-                          title: { type: "string" },
-                          url: { type: "string" },
-                        },
+                        properties: { title: { type: "string" }, url: { type: "string" }, group_id: { type: "string" }, group_title: { type: "string" } },
+                        required: ["title", "url"],
+                      },
+                    },
+                    images: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: { title: { type: "string" }, url: { type: "string" }, group_id: { type: "string" }, group_title: { type: "string" } },
                         required: ["title", "url"],
                       },
                     },
@@ -1447,10 +1407,7 @@ const MCP_TOOLS = [
             required: ["title", "lessons"],
           },
         },
-        skip_duplicate_urls: {
-          type: "boolean",
-          description: "تخطي الروابط المضافة مسبقاً في نفس الدرس لمنع التكرار (افتراضي: true).",
-        },
+        skip_duplicate_urls: { type: "boolean" },
       },
       required: ["subject", "units"],
     },
@@ -1458,111 +1415,110 @@ const MCP_TOOLS = [
   {
     name: "quick_import_youtube_playlist",
     description:
-      "استيراد سريع بخطوة واحدة لقائمة تشغيل يوتيوب وتقسيمها تلقائياً إلى مادة ووحدات ودروس وتمارين. (يفضل استخدام fetch_youtube_playlist ثم apply_curriculum_plan إذا أردت تقسيماً مخصصاً دقيقاً بذكائك).",
+      "استيراد سريع بخطوة واحدة لقائمة تشغيل يوتيوب وتقسيمها تلقائياً إلى مادة ووحدات ودروس أو تمارين.",
     inputSchema: {
       type: "object",
       properties: {
-        playlist_url: { type: "string", description: "رابط قائمة تشغيل يوتيوب." },
-        subject_name_or_id: { type: "string", description: "اسم أو معرف المادة (اختياري — يُكتشف تلقائياً إن تُرك فارغاً)." },
-        unit_title_or_id: { type: "string", description: "عنوان أو معرف الوحدة (اختياري)." },
+        playlist_url: { type: "string" },
+        subject_name_or_id: { type: "string" },
+        unit_title_or_id: { type: "string" },
         grouping_mode: {
           type: "string",
           enum: ["smart", "per_video", "unit_exercises", "single_lesson"],
-          description: "طريقة تقسيم المحتوى: smart (تجميع أجزاء الدرس وفصل التمارين)، per_video (درس لكل فيديو)، unit_exercises (وضع كل فيديو كتمرين مستقل في قسم تمارين الوحدة)، single_lesson (كلها في درس واحد).",
         },
-        separate_exercises: {
-          type: "boolean",
-          description: "وضع فيديوهات التمارين وحلول البكالوريا في قسم التمارين تلقائياً (افتراضي: true).",
-        },
+        separate_exercises: { type: "boolean" },
       },
       required: ["playlist_url"],
     },
   },
   {
     name: "manage_subject",
-    description: "إدارة المواد الدراسية: إنشاء مادة جديدة (create)، تعديل اسم/أيقونة/لون/ترتيب مادة (update)، أو حذف مادة (delete).",
+    description: "إدارة المواد الدراسية: create / update / delete.",
     inputSchema: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["create", "update", "delete"] },
-        id: { type: "string", description: "معرف المادة (مطلوب عند update أو delete)." },
-        name: { type: "string", description: "اسم المادة." },
-        icon: { type: "string", description: "اسم الأيقونة (math, atom, dna, book-open, bulb, fr, gb, globe, mosque, chart, book) أو رابط صورة." },
-        color: { type: "string", description: "اللون (indigo, teal, green, amber, purple, blue, sky, rose, emerald, orange, cyan)." },
-        sort_order: { type: "number", description: "ترتيب الظهور." },
+        id: { type: "string" },
+        name: { type: "string" },
+        icon: { type: "string" },
+        color: { type: "string" },
+        sort_order: { type: "number" },
       },
       required: ["action"],
     },
   },
   {
     name: "manage_unit",
-    description: "إدارة الوحدات الدراسية: إنشاء وحدة (create)، تعديل عنوانها أو نقلها لمادة أخرى أو تغيير ترتيبها (update)، أو حذفها (delete).",
+    description: "إدارة الوحدات الدراسية: create / update / delete.",
     inputSchema: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["create", "update", "delete"] },
-        id: { type: "string", description: "معرف الوحدة (مطلوب عند update أو delete)." },
-        subject_id: { type: "string", description: "معرف المادة التابعة لها (مطلوب عند create، واختياري للنقل عند update)." },
-        title: { type: "string", description: "عنوان الوحدة." },
-        sort_order: { type: "number", description: "ترتيب الوحدة داخل المادة." },
+        id: { type: "string" },
+        subject_id: { type: "string" },
+        title: { type: "string" },
+        sort_order: { type: "number" },
       },
       required: ["action"],
     },
   },
   {
     name: "manage_lesson",
-    description: "إدارة الدروس أو تمارين الوحدة المستقلة: إنشاء درس أو تمرين مستقل داخل الوحدة (create مع تحديد item_type = lesson أو exercise)، تعديل عنوانه أو نقله لوحدة أخرى أو ترتيبه (update)، أو حذفه (delete).",
+    description: "إدارة الدروس أو تمارين الوحدة المستقلة: create / update / delete (مع item_type = lesson أو exercise).",
     inputSchema: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["create", "update", "delete"] },
-        id: { type: "string", description: "معرف الدرس أو التمرين (مطلوب عند update أو delete)." },
-        unit_id: { type: "string", description: "معرف الوحدة التابع لها (مطلوب عند create، واختياري للنقل عند update)." },
-        title: { type: "string", description: "عنوان الدرس أو التمرين." },
-        item_type: { type: "string", enum: ["lesson", "exercise"], description: "lesson = درس في قسم الدروس، exercise = تمرين مستقل في قسم تمارين الوحدة." },
-        sort_order: { type: "number", description: "الترتيب داخل الوحدة." },
+        id: { type: "string" },
+        unit_id: { type: "string" },
+        title: { type: "string" },
+        item_type: { type: "string", enum: ["lesson", "exercise"] },
+        sort_order: { type: "number" },
       },
       required: ["action"],
     },
   },
   {
     name: "manage_resource",
-    description: "إدارة محتوى الدرس أو التمرين المستقل (فيديو، ملخص PDF، صورة، أو تمرين مرفق): إضافة (create)، تعديل (update)، أو حذف (delete). كما يدعم copy_to_all_unit_lessons لنسخ العنصر إلى جميع دروس الوحدة تلقائياً عند الإضافة.",
+    description: "إدارة محتوى الدرس أو التمرين المستقل (فيديو، ملخص PDF، صورة، أو تمرين مرفق): يدعم إضافة عنصر مفرد عبر url أو مجموعة ديناميكية (عنوان + عدة صور/فيديوهات/ملفات PDF) عبر مصفوفة urls، كما يدعم النسخ التلقائي لجميع دروس الوحدة عبر copy_to_all_unit_lessons.",
     inputSchema: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["create", "update", "delete"] },
-        id: { type: "string", description: "معرف المورد (مطلوب عند update أو delete)." },
-        lesson_id: { type: "string", description: "معرف الدرس أو التمرين المستقل (مطلوب عند create، واختياري عند update)." },
-        kind: { type: "string", enum: ["video", "pdf", "image", "exercise"], description: "نوع المحتوى." },
-        title: { type: "string", description: "عنوان الفيديو أو الملخص أو التمرين." },
-        url: { type: "string", description: "رابط يوتيوب أو رابط الملف المباشر." },
-        exercise_type: { type: "string", enum: ["video", "pdf", "image", "link"], description: "نوع التمرين عندما يكون kind = exercise." },
-        copy_to_all_unit_lessons: { type: "boolean", description: "إذا كان true عند الإضافة (create)، يُنسخ هذا الملخص أو التمرين تلقائياً إلى جميع الدروس داخل نفس الوحدة." },
-        sort_order: { type: "number", description: "ترتيب العرض داخل القسم." },
+        id: { type: "string" },
+        lesson_id: { type: "string" },
+        kind: { type: "string", enum: ["video", "pdf", "image", "exercise"] },
+        title: { type: "string", description: "عنوان الفقرة / المجموعة أو العنصر." },
+        group_id: { type: "string", description: "اختياري: معرف مجموعة موجودة لإلحاق عناصر إضافية تحت نفس العنوان." },
+        group_title: { type: "string", description: "اختياري: عنوان المجموعة الديناميكية." },
+        url: { type: "string", description: "رابط مفرد." },
+        urls: { type: "array", items: { type: "string" }, description: "مصفوفة روابط لإضافة عدة صور أو فيديوهات أو ملفات PDF تحت نفس العنوان." },
+        exercise_type: { type: "string", enum: ["video", "pdf", "image", "link"] },
+        copy_to_all_unit_lessons: { type: "boolean" },
+        sort_order: { type: "number" },
       },
       required: ["action"],
     },
   },
   {
     name: "copy_resource_to_unit_lessons",
-    description: "نسخ مورد موجود (ملخص PDF، تمرين، صورة، أو فيديو) إلى جميع الدروس داخل نفس الوحدة دفعة واحدة دون تكرار.",
+    description: "نسخ مورد موجود (أو مجموعة كاملة بعنوانها وجميع صورها/ملفاتها عبر group_id) إلى جميع الدروس داخل نفس الوحدة دفعة واحدة.",
     inputSchema: {
       type: "object",
       properties: {
-        resource_id: { type: "string", description: "معرف المورد المراد نسخه." },
-        unit_id: { type: "string", description: "اختياري: معرف الوحدة المستهدفة (إن تُرك فارغاً تُستخدم وحدة الدرس الحالي للمورد)." },
+        resource_id: { type: "string" },
+        group_id: { type: "string" },
+        unit_id: { type: "string" },
       },
-      required: ["resource_id"],
     },
   },
   {
     name: "search_site_content",
-    description: "البحث بالكلمات المفتاحية في جميع المواد والوحدات والدروس والموارد داخل موقع آية باك 2027.",
+    description: "البحث بالكلمات المفتاحية في جميع المواد والوحدات والدروس والتمارين والموارد.",
     inputSchema: {
       type: "object",
       properties: {
-        query: { type: "string", description: "كلمة أو عبارة البحث." },
+        query: { type: "string" },
       },
       required: ["query"],
     },
@@ -1642,8 +1598,6 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
             .filter((u) => u.subject_id === s.id)
             .map((u) => ({ id: u.id, title: u.title })),
         })),
-        instruction_hint:
-          "يمكنك الآن مراجعة الفيديوهات المستخرجة وتقسيمها بدقة إلى مادة ووحدات ودروس وتمارين ثم استدعاء apply_curriculum_plan لحفظها دفعة واحدة.",
       };
     }
 
@@ -1794,23 +1748,40 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
       if (action === "create") {
         const lessonId = String(args?.lesson_id || "").trim();
         const kind = String(args?.kind || "video").trim();
-        const url = String(args?.url || "").trim();
-        if (!lessonId || !url) throw new Error("كل من lesson_id و url مطلوبان لإضافة مورد.");
+        const urlList: string[] = Array.isArray(args?.urls)
+          ? args.urls.map((u: unknown) => String(u || "").trim()).filter(Boolean)
+          : (args?.url ? [String(args.url).trim()].filter(Boolean) : []);
+        if (!lessonId || !urlList.length) {
+          throw new Error("كل من lesson_id و (url أو urls) مطلوبان لإضافة مورد.");
+        }
         const d = await dbSelectAll();
-        const maxOrder = d.resources
+        let nextOrder = d.resources
           .filter((r) => r.lesson_id === lessonId && r.kind === kind)
           .reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
-        const row: ResourceRow = {
-          id: uid("r"),
-          lesson_id: lessonId,
-          kind,
-          title: String(args?.title || "محتوى").trim(),
-          url,
-          size: null,
-          exercise_type: kind === "exercise" ? String(args?.exercise_type || "video") : null,
-          sort_order: Number(args?.sort_order) || maxOrder + 1,
-        };
-        const rowsToSave: ResourceRow[] = [row];
+
+        const groupTitle = String(args?.group_title || args?.title || "محتوى").trim();
+        const groupId = String(args?.group_id || uid("g")).trim();
+        const exType = kind === "exercise" ? String(args?.exercise_type || "video") : null;
+
+        const primaryRows: ResourceRow[] = urlList.map((u, idx) => {
+          nextOrder += 1;
+          return {
+            id: uid("r"),
+            lesson_id: lessonId,
+            kind,
+            title: urlList.length > 1 ? `${groupTitle} (${idx + 1})` : groupTitle,
+            url: u,
+            size: null,
+            exercise_type: exType,
+            group_id: groupId,
+            group_title: groupTitle,
+            sort_order: idx === 0 && args?.sort_order ? Number(args.sort_order) : nextOrder,
+          };
+        });
+
+        const rowsToSave: ResourceRow[] = [...primaryRows];
+        let copiedLessonsCount = 0;
+
         if (args?.copy_to_all_unit_lessons) {
           const parentItem = d.lessons.find((l) => l.id === lessonId);
           if (parentItem) {
@@ -1820,23 +1791,40 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
             );
             for (const sib of siblingLessons) {
               const sibRes = d.resources.filter((r) => r.lesson_id === sib.id && r.kind === kind);
-              if (sibRes.some((r) => r.url === url)) continue;
-              const sibMax = sibRes.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
-              rowsToSave.push({
-                id: uid("r"),
-                lesson_id: sib.id,
-                kind,
-                title: row.title,
-                url,
-                size: null,
-                exercise_type: row.exercise_type,
-                sort_order: sibMax + 1,
-              });
+              let sibMax = sibRes.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
+              const sibGroupId = uid("g");
+              let sibAdded = false;
+              for (const pr of primaryRows) {
+                if (sibRes.some((r) => r.url === pr.url)) continue;
+                sibMax += 1;
+                rowsToSave.push({
+                  id: uid("r"),
+                  lesson_id: sib.id,
+                  kind,
+                  title: pr.title,
+                  url: pr.url,
+                  size: null,
+                  exercise_type: pr.exercise_type,
+                  group_id: sibGroupId,
+                  group_title: groupTitle,
+                  sort_order: sibMax,
+                });
+                sibAdded = true;
+              }
+              if (sibAdded) copiedLessonsCount++;
             }
           }
         }
         const saved = await dbUpsert("resources", rowsToSave, adminKey);
-        return { ok: true, action: "created", resource: saved[0], copied_to_lessons: Math.max(0, saved.length - 1) };
+        return {
+          ok: true,
+          action: "created",
+          group_id: groupId,
+          group_title: groupTitle,
+          items_created: primaryRows.length,
+          resources: saved.slice(0, primaryRows.length),
+          copied_to_lessons: copiedLessonsCount,
+        };
       }
       if (action === "update") {
         const id = String(args?.id || "").trim();
@@ -1845,6 +1833,8 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
         if (args?.lesson_id !== undefined) patch.lesson_id = String(args.lesson_id).trim();
         if (args?.kind !== undefined) patch.kind = String(args.kind).trim();
         if (args?.title !== undefined) patch.title = String(args.title).trim();
+        if (args?.group_id !== undefined) patch.group_id = args.group_id ? String(args.group_id).trim() : null;
+        if (args?.group_title !== undefined) patch.group_title = args.group_title ? String(args.group_title).trim() : null;
         if (args?.url !== undefined) patch.url = String(args.url).trim();
         if (args?.exercise_type !== undefined) patch.exercise_type = args.exercise_type;
         if (args?.sort_order !== undefined) patch.sort_order = Number(args.sort_order);
@@ -1862,39 +1852,56 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
 
     case "copy_resource_to_unit_lessons": {
       const resourceId = String(args?.resource_id || "").trim();
-      if (!resourceId) throw new Error("معرف المورد (resource_id) مطلوب.");
+      const groupIdArg = String(args?.group_id || "").trim();
+      if (!resourceId && !groupIdArg) {
+        throw new Error("معرف المورد (resource_id) أو معرف المجموعة (group_id) مطلوب.");
+      }
       const d = await dbSelectAll();
-      const src = d.resources.find((r) => r.id === resourceId);
-      if (!src) throw new Error(`المورد (${resourceId}) غير موجود.`);
-      const parentLesson = d.lessons.find((l) => l.id === src.lesson_id);
+      const bundle: ResourceRow[] = groupIdArg
+        ? d.resources.filter((r) => r.group_id === groupIdArg)
+        : d.resources.filter((r) => r.id === resourceId);
+      if (!bundle.length) throw new Error("لم يتم العثور على المورد أو المجموعة المطلوبة.");
+
+      const firstSrc = bundle[0];
+      const parentLesson = d.lessons.find((l) => l.id === firstSrc.lesson_id);
       const targetUnitId = String(args?.unit_id || parentLesson?.unit_id || "").trim();
       if (!targetUnitId) throw new Error("تعذّر تحديد الوحدة المستهدفة.");
       const isRowEx = (l: LessonRow) => l.item_type === "exercise" || l.id.startsWith("ex-");
       const targetLessons = d.lessons.filter(
-        (l) => l.unit_id === targetUnitId && l.id !== src.lesson_id && !isRowEx(l),
+        (l) => l.unit_id === targetUnitId && l.id !== firstSrc.lesson_id && !isRowEx(l),
       );
       const toInsert: ResourceRow[] = [];
+      let copiedLessons = 0;
       let skipped = 0;
       for (const tl of targetLessons) {
-        const existing = d.resources.filter((r) => r.lesson_id === tl.id && r.kind === src.kind);
-        if (existing.some((r) => r.url === src.url)) {
-          skipped++;
-          continue;
+        const existing = d.resources.filter((r) => r.lesson_id === tl.id && r.kind === firstSrc.kind);
+        let maxOrd = existing.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
+        const newGid = firstSrc.group_id ? uid("g") : null;
+        let lessonTouched = false;
+        for (const src of bundle) {
+          if (existing.some((r) => r.url === src.url)) {
+            skipped++;
+            continue;
+          }
+          maxOrd += 1;
+          toInsert.push({
+            id: uid("r"),
+            lesson_id: tl.id,
+            kind: src.kind,
+            title: src.title,
+            url: src.url,
+            size: src.size,
+            exercise_type: src.exercise_type,
+            group_id: newGid,
+            group_title: src.group_title ?? null,
+            sort_order: maxOrd,
+          });
+          lessonTouched = true;
         }
-        const maxOrd = existing.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
-        toInsert.push({
-          id: uid("r"),
-          lesson_id: tl.id,
-          kind: src.kind,
-          title: src.title,
-          url: src.url,
-          size: src.size,
-          exercise_type: src.exercise_type,
-          sort_order: maxOrd + 1,
-        });
+        if (lessonTouched) copiedLessons++;
       }
       if (toInsert.length) await dbUpsert("resources", toInsert, adminKey);
-      return { ok: true, copied_count: toInsert.length, skipped_existing: skipped };
+      return { ok: true, copied_lessons: copiedLessons, items_inserted: toInsert.length, skipped_existing: skipped };
     }
 
     case "search_site_content": {
@@ -1906,7 +1913,7 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
         units: d.units.filter((u) => normAr(u.title).includes(q)),
         lessons: d.lessons.filter((l) => normAr(l.title).includes(q)),
         resources: d.resources
-          .filter((r) => normAr(r.title || "").includes(q) || (r.url || "").toLowerCase().includes(q))
+          .filter((r) => normAr(r.group_title || r.title || "").includes(q) || (r.url || "").toLowerCase().includes(q))
           .slice(0, 60),
       };
     }
@@ -1916,7 +1923,6 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
   }
 }
 
-/* ============ تنظيم ذكي عبر Claude API (اختياري عند توفر مفتاح Anthropic) ============ */
 const CLAUDE_MODELS = [
   "claude-sonnet-4-5",
   "claude-sonnet-4-20250514",
@@ -1967,12 +1973,11 @@ async function organizeWithClaudeApi(
   const systemPrompt =
     `أنت خبير في مناهج شهادة البكالوريا الجزائرية ومنظم محتوى منصة "آية باك 2027".
 مهمتك تحويل قائمة تشغيل يوتيوب إلى خطة JSON دقيقة بصيغة CurriculumPlan لتصنيف الفيديوهات حسب:
-المادة (subject) ← الوحدات (units) ← الدروس (lessons) ← الفيديوهات (videos) والتمارين (exercises).
+المادة (subject) ← الوحدات (units) ← الدروس أو تمارين الوحدة (lessons) ← الفيديوهات (videos) والتمارين (exercises).
 القواعد:
 1. إذا طابقت المادة أو الوحدة شيئاً موجوداً في الموقع، ضع الـ id الموجود.
-2. نظف عناوين الدروس من الحشو الدعائي، واجمع أجزاء الدرس الواحد (مثل الجزء 1، الجزء 2) في درس واحد، وضع فيديوهات حلول التمارين أو مواضيع البكالوريا في مصفوفة exercises مع exercise_type="video" في الدرس المناسب.
-3. أرجع كائن JSON صالح فقط بدون أي نص خارجه أو علامات markdown، يطابق الشكل:
-{"subject":{"id":"اختياري","name":"اسم المادة","icon":"math|atom|dna|book-open|bulb|fr|gb|globe|mosque|chart|book","color":"indigo|teal|green|amber|purple|blue|sky|rose|emerald"},"units":[{"id":"اختياري","title":"عنوان الوحدة","lessons":[{"title":"عنوان الدرس","videos":[{"title":"...","url":"..."}],"exercises":[{"title":"...","url":"...","exercise_type":"video"}]}]}]}`;
+2. نظف عناوين الدروس من الحشو الدعائي، واجمع أجزاء الدرس الواحد في درس واحد، وضع فيديوهات حلول التمارين إما في مصفوفة exercises داخل الدرس أو كعنصر مستقل مع item_type="exercise" إذا طلب المدير إضافتها لقسم تمارين الوحدة.
+3. أرجع كائن JSON صالح فقط بدون أي نص خارجه أو علامات markdown.`;
 
   const userPayload = {
     existing_site_subjects_and_units: existingSummary,
@@ -2005,7 +2010,6 @@ async function organizeWithClaudeApi(
   return parsed;
 }
 
-/* دردشة Claude التفاعلية مع الأدوات داخل لوحة التحكم */
 async function runClaudeAdminChat(
   anthropicKey: string,
   userMessages: Array<{ role: "user" | "assistant"; content: string }>,
@@ -2019,8 +2023,8 @@ async function runClaudeAdminChat(
 
   const systemPrompt =
     `أنت المساعد الإداري الذكي لمنصة "آية باك 2027" (بكالوريا الجزائر).
-يمكنك قراءة وتعديل المواد والوحدات والدروس والموارد مباشرة، واستخراج قوائم تشغيل يوتيوب وتقسيمها حسب المادة والوحدة والدرس باستخدام الأدوات المتاحة لك.
-تحدث بالعربية الواضحة والمختصرة، وعندما يرسل المدير رابط قائمة تشغيل يوتيوب قم بجلبها عبر fetch_youtube_playlist وتعرّف على هيكل الموقع عبر get_site_structure ثم قسّمها بذكاء واحفظها عبر apply_curriculum_plan وأخبره بالملخص الدقيق لما أضفته.`;
+يمكنك إدارة المواد والوحدات والدروس وتمارين الوحدات والموارد والمجموعات الديناميكية (عنوان + عدة صور/فيديوهات/ملفات PDF)، ونسخ أي مجموعة لجميع دروس الوحدة، واستخراج قوائم تشغيل يوتيوب وتقسيمها.
+تحدث بالعربية الواضحة والمختصرة.`;
 
   const convo: any[] = userMessages.slice(-14).map((m) => ({
     role: m.role === "assistant" ? "assistant" : "user",
@@ -2093,7 +2097,6 @@ async function runClaudeAdminChat(
   };
 }
 
-/* ============ معالج بروتوكول MCP JSON-RPC 2.0 (Streamable HTTP) ============ */
 const MCP_PROMPTS = [
   {
     name: "import_youtube_playlist",
@@ -2119,7 +2122,6 @@ async function handleSingleJsonRpc(
   const method = String(rpc.method || "");
   const params = rpc.params || {};
 
-  // الإشعارات في JSON-RPC (بدون id) لا يُرد عليها بجسم JSON
   if (!hasId) {
     return null;
   }
@@ -2141,10 +2143,10 @@ async function handleSingleJsonRpc(
           },
           serverInfo: {
             name: "aya-bac-2027",
-            version: "1.0.0",
+            version: "1.2.0",
           },
           instructions:
-            "خادم إدارة منصة «آية باك 2027» التعليمية (بكالوريا الجزائر). عند إرسال رابط قائمة تشغيل يوتيوب، استدعِ get_site_structure و fetch_youtube_playlist ثم نظّم الفيديوهات بذكاء حسب المادة والوحدة والدرس (مع وضع التمارين في exercises) واحفظها عبر apply_curriculum_plan.",
+            "خادم إدارة منصة «آية باك 2027» التعليمية. يدعم الدروس وتمارين الوحدات المستقلة والمجموعات الديناميكية للموارد (عنوان + عدة صور/فيديوهات/ملفات PDF عبر مصفوفة urls في manage_resource).",
         },
       };
     }
@@ -2202,7 +2204,7 @@ async function handleSingleJsonRpc(
                 role: "user",
                 content: {
                   type: "text",
-                  text: `قم بجلب قائمة تشغيل يوتيوب التالية: ${u}${n}\nافحص المواد والوحدات الحالية في موقع آية باك 2027، ثم قسّم الفيديوهات بدقة حسب المادة والوحدة والدرس (مع فصل فيديوهات التمارين وحلول المواضيع في قسم التمارين)، وأضفها إلى الموقع عبر apply_curriculum_plan ثم اعرض لي ملخصاً واضحاً.`,
+                  text: `قم بجلب قائمة تشغيل يوتيوب التالية: ${u}${n}\nافحص المواد والوحدات الحالية في موقع آية باك 2027، ثم قسّم الفيديوهات بدقة حسب المادة والوحدة والدرس أو التمارين، وأضفها إلى الموقع عبر apply_curriculum_plan ثم اعرض لي ملخصاً واضحاً.`,
                 },
               },
             ],
@@ -2219,7 +2221,7 @@ async function handleSingleJsonRpc(
               role: "user",
               content: {
                 type: "text",
-                text: "اعرض لي هيكل المواد والوحدات والدروس الحالية في موقع آية باك 2027 مع إحصائيات المحتوى.",
+                text: "اعرض لي هيكل المواد والوحدات والدروس والتمارين الحالية في موقع آية باك 2027 مع إحصائيات المحتوى.",
               },
             },
           ],
@@ -2249,7 +2251,6 @@ async function handleSingleJsonRpc(
   }
 }
 
-/* ============ نقطة الدخول الرئيسية (Deno.serve) ============ */
 Deno.serve(async (req: Request): Promise<Response> => {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers: CORS_HEADERS });
@@ -2262,7 +2263,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
   const { subPath, adminKey } = parseRequestAuthAndRoute(req);
 
   try {
-    // 1) نقطة جلب قائمة يوتيوب للوحة التحكم: /api/playlist
     if (subPath === "/api/playlist") {
       let urlInput = new URL(req.url).searchParams.get("url") || "";
       if (req.method === "POST") {
@@ -2280,7 +2280,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonResponse({ ok: true, playlist, suggestedPlan });
     }
 
-    // 2) نقطة التنظيم الذكي (عبر Claude API إن توفر مفتاح، أو المنظم المدمج الذكي): /api/ai-organize
     if (subPath === "/api/ai-organize" && req.method === "POST") {
       const b = await req.json();
       const [playlist, siteData] = await Promise.all([
@@ -2309,7 +2308,6 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonResponse({ ok: true, mode: "smart", playlist, plan: smartPlan });
     }
 
-    // 3) نقطة دردشة الإدارة عبر Claude API: /api/ai-chat
     if (subPath === "/api/ai-chat" && req.method === "POST") {
       const b = await req.json();
       const claudeKey = String(b.anthropicKey || Deno.env.get("ANTHROPIC_API_KEY") || "").trim();
@@ -2323,10 +2321,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonResponse(chatRes);
     }
 
-    // 4) طلبات GET على نقطة MCP الجذرية
     if (req.method === "GET") {
       const accept = (req.headers.get("accept") || "").toLowerCase();
-      // حسب مواصفة MCP Streamable HTTP: إرجاع 405 لعميل البث المباشر كي يعمل بنمط POST عديم الحالة
       if (accept.includes("text/event-stream") && !accept.includes("text/html") && subPath === "/") {
         return new Response(null, {
           status: 405,
@@ -2336,14 +2332,13 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonResponse({
         ok: true,
         service: "aya-bac-2027-mcp",
-        version: "1.0.0",
+        version: "1.2.0",
         authenticated_key_present: Boolean(adminKey),
         tools_count: MCP_TOOLS.length,
         message: "خادم الذكاء الاصطناعي و Claude MCP لمنصة آية باك 2027 جاهز للاتصال.",
       });
     }
 
-    // 5) طلبات POST لبروتوكول MCP JSON-RPC 2.0
     if (req.method === "POST") {
       const payload = await req.json();
 
