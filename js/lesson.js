@@ -354,23 +354,8 @@ function initLessonPage() {
   var shellEl = $('#playerShell');
   var tabsEl = $('#videoTabs');
 
-  function openSectionAccordion(secEl) {
-    if (!secEl) return;
-    secEl.style.display = '';
-    secEl.classList.add('is-open');
-    secEl.classList.remove('is-collapsed');
-    var body = secEl.querySelector('.lesson-sec-content');
-    if (body) body.hidden = false;
-    var tBtn = secEl.querySelector('.sec-acc-toggle');
-    if (tBtn) {
-      tBtn.setAttribute('aria-expanded', 'true');
-      var lbl = tBtn.querySelector('.sec-acc-lbl');
-      if (lbl) lbl.textContent = 'إخفاء';
-    }
-  }
-
   function ensurePlayer() {
-    if (vidSection) openSectionAccordion(vidSection);
+    if (vidSection) vidSection.style.display = '';
     shellEl.hidden = false;
     if (!player) player = new AyaPlayer(shellEl);
     return player;
@@ -790,125 +775,7 @@ function initLessonPage() {
     $('#exSection').style.display = 'none';
   }
 
-  /* ---- تفعيل الطي الذكي للأقسام والمجموعات (فتح القسم/العنوان الأول فقط وإغلاق البقية بزر سهم) ---- */
-  function setupCollapsibleGroupsInSection(secEl) {
-    var cards = $all('.media-group-card', secEl);
-    if (cards.length <= 1) return;
-
-    var secBody = secEl.querySelector('.lesson-sec-content');
-    if (secBody) {
-      var subBar = secBody.querySelector('.sec-subtools-bar');
-      if (!subBar) {
-        subBar = document.createElement('div');
-        subBar.className = 'sec-subtools-bar';
-        secBody.insertBefore(subBar, secBody.firstChild);
-      }
-      var toggleAllBtn = document.createElement('button');
-      toggleAllBtn.type = 'button';
-      toggleAllBtn.className = 'btn btn-sm';
-      var allExpanded = false;
-      function syncToggleAllLbl() {
-        toggleAllBtn.innerHTML = svgIcon(allExpanded ? 'chevron-up' : 'chevron-down') +
-          ' ' + (allExpanded ? 'طي العناوين الفرعية' : 'فتح كل العناوين (' + cards.length + ')');
-      }
-      syncToggleAllLbl();
-      toggleAllBtn.addEventListener('click', function () {
-        allExpanded = !allExpanded;
-        cards.forEach(function (c, idx) {
-          var open = allExpanded ? true : (idx === 0);
-          setGroupCardOpen(c, open);
-        });
-        syncToggleAllLbl();
-      });
-      subBar.appendChild(toggleAllBtn);
-    }
-
-    function setGroupCardOpen(card, open) {
-      card.classList.toggle('is-open', open);
-      card.classList.toggle('is-collapsed', !open);
-      Array.prototype.forEach.call(card.children, function (ch) {
-        if (!ch.classList.contains('media-group-head')) ch.hidden = !open;
-      });
-      var arrBtn = card.querySelector('.mg-acc-btn');
-      if (arrBtn) {
-        arrBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-        var sp = arrBtn.querySelector('span');
-        if (sp) sp.textContent = open ? 'إخفاء' : 'إظهار المحتوى';
-      }
-    }
-
-    cards.forEach(function (card, idx) {
-      var head = card.querySelector('.media-group-head');
-      if (!head) return;
-      head.style.cursor = 'pointer';
-      var arrBtn = document.createElement('button');
-      arrBtn.type = 'button';
-      arrBtn.className = 'btn-acc-arrow mg-acc-btn';
-      arrBtn.innerHTML = '<span>' + (idx === 0 ? 'إخفاء' : 'إظهار المحتوى') + '</span>' + svgIcon('chevron-down');
-      head.appendChild(arrBtn);
-
-      setGroupCardOpen(card, idx === 0);
-
-      head.addEventListener('click', function (e) {
-        if (e.target.closest('.ex-open-gal-btn')) return;
-        var nextOpen = card.classList.contains('is-collapsed');
-        setGroupCardOpen(card, nextOpen);
-      });
-    });
-  }
-
-  var sectionCounts = {
-    videoSection: videos.length ? (videos.length + ' فيديو') : '',
-    pdfSection:   pdfs.length ? (pdfs.length + ' ملف') : '',
-    imgSection:   images.length ? (groupResources(images).length + ' عنوان · ' + images.length + ' صورة') : '',
-    exSection:    exs.length ? (groupResources(exs).length + ' عنوان · ' + exs.length + ' عنصر') : ''
-  };
-
-  var visibleSections = $all('.lesson-wrap > .lesson-section').filter(function (sec) {
-    return sec.style.display !== 'none';
-  });
-
-  visibleSections.forEach(function (sec, idx) {
-    setupCollapsibleGroupsInSection(sec);
-    var h2 = sec.querySelector(':scope > h2');
-    var body = sec.querySelector(':scope > .lesson-sec-content');
-    if (!h2 || !body) return;
-
-    var toggleBar = document.createElement('button');
-    toggleBar.type = 'button';
-    toggleBar.className = 'sec-acc-toggle';
-    var countTxt = sectionCounts[sec.id] || '';
-    var isFirst = (idx === 0);
-
-    toggleBar.setAttribute('aria-expanded', isFirst ? 'true' : 'false');
-    toggleBar.innerHTML =
-      '<span class="sec-acc-title">' + h2.innerHTML +
-        (countTxt ? ' <span class="sec-acc-cnt">' + escapeHtml(countTxt) + '</span>' : '') +
-      '</span>' +
-      '<span class="sec-acc-arrow">' +
-        '<span class="sec-acc-lbl">' + (isFirst ? 'إخفاء' : 'إظهار المحتوى') + '</span>' +
-        '<span class="acc-chevron">' + svgIcon('chevron-down') + '</span>' +
-      '</span>';
-
-    sec.insertBefore(toggleBar, h2);
-    h2.remove();
-
-    sec.classList.toggle('is-open', isFirst);
-    sec.classList.toggle('is-collapsed', !isFirst);
-    body.hidden = !isFirst;
-
-    toggleBar.addEventListener('click', function () {
-      var nowOpen = body.hidden;
-      body.hidden = !nowOpen;
-      sec.classList.toggle('is-open', nowOpen);
-      sec.classList.toggle('is-collapsed', !nowOpen);
-      toggleBar.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
-      var lbl = toggleBar.querySelector('.sec-acc-lbl');
-      if (lbl) lbl.textContent = nowOpen ? 'إخفاء' : 'إظهار المحتوى';
-    });
-  });
-
-  /* إذا كان الدرس أو التمرين فارغاً تماماً نعرض تنبيه الفراغ */
+  /* جميع الأقسام والفقرات التي تحتوي محتوى تظهر مفتوحة مباشرة في موقع المستخدم (الطي مخصص للوحة الأدمن فقط) */
   if (!videos.length && !pdfs.length && !images.length && !exs.length) {
     $('#emptyAll').hidden = false;
   }

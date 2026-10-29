@@ -69,11 +69,11 @@
               '<h1>' + escapeHtml(subject.name) + '</h1>' +
               '<span class="subj-coeff-badge">المعامل ' + coeff + '</span>' +
             '</div>' +
-            '<div class="meta">الوحدة الأولى مفتوحة افتراضياً والبقية تفتح بالضغط على زر السهم</div>' +
+            '<div class="meta">اختر الوحدة لتصفّح الدروس أو التمارين</div>' +
           '</div>' +
         '</div>';
 
-      /* قائمة الوحدات: الوحدة الأولى مفتوحة والبقية مطوية بزر سهم لإظهار/إخفاء المحتوى */
+      /* قائمة الوحدات (معروضة بشكل مباشر وواضح للمستخدم دون طيّ) */
       var units = unitsOf(data, subject.id);
       var listEl = $('#unitsList');
 
@@ -85,73 +85,18 @@
           var exs = unitExercisesOf(data, u.id);
           var doneCount = ls.concat(exs).filter(function (it) { return isItemCompleted(it.id); }).length;
           var totalCount = ls.length + exs.length;
-          var isFirst = (i === 0);
 
-          var previewHTML = ls.slice(0, 4).map(function (l, li) {
-            var done = isItemCompleted(l.id);
-            return '<a class="unit-preview-row' + (done ? ' is-done' : '') + '" href="lesson.html?lesson=' + encodeURIComponent(l.id) + '">' +
-              '<span class="upr-num">' + (done ? svgIcon('check') : (li + 1)) + '</span>' +
-              '<span class="upr-title">' + escapeHtml(l.title) + '</span>' +
-              (done ? '<span class="done-mini-tag">مكتمل ✓</span>' : '<span class="upr-go">' + svgIcon('chevron-left') + '</span>') +
-            '</a>';
-          }).join('');
-
-          return '<article class="unit-acc-student ' + (subject.color ? 'c-' + subject.color : '') + (isFirst ? ' is-open' : ' is-collapsed') + '" data-unit-acc>' +
-            '<div class="row-card unit-acc-trigger" role="button" tabindex="0" aria-expanded="' + (isFirst ? 'true' : 'false') + '">' +
-              '<div class="num">' + (i + 1) + '</div>' +
-              '<div class="info"><div class="t">' + escapeHtml(u.title) + '</div>' +
-              '<div class="badges">' +
-                '<span class="badge' + (ls.length ? ' on' : '') + '">' + svgIcon('film') + ' ' + ls.length + ' دروس</span>' +
-                '<span class="badge' + (exs.length ? ' on' : '') + '">' + svgIcon('pencil') + ' ' + exs.length + ' تمارين</span>' +
-                (doneCount ? '<span class="badge done-badge">' + svgIcon('check-circle') + ' مكتمل ' + doneCount + '/' + totalCount + '</span>' : '') +
-              '</div></div>' +
-              '<button type="button" class="btn-acc-arrow' + (isFirst ? ' open' : '') + '" data-toggle-unit>' +
-                '<span>' + (isFirst ? 'إخفاء' : 'إظهار المحتوى') + '</span>' + svgIcon('chevron-down') +
-              '</button>' +
-            '</div>' +
-            '<div class="unit-acc-panel"' + (isFirst ? '' : ' hidden') + '>' +
-              (previewHTML ? '<div class="unit-preview-list">' + previewHTML +
-                (ls.length > 4 ? '<a class="unit-more-link" href="unit.html?unit=' + encodeURIComponent(u.id) + '&section=lessons">+ عرض بقية الدروس (' + ls.length + ')</a>' : '') +
-              '</div>' : '') +
-              '<div class="unit-card-actions">' +
-                '<a class="btn btn-primary btn-sm" href="unit.html?unit=' + encodeURIComponent(u.id) + '&section=lessons">' +
-                  svgIcon('film') + ' صفحة الدروس (' + ls.length + ')' +
-                '</a>' +
-                '<a class="btn btn-sm" href="unit.html?unit=' + encodeURIComponent(u.id) + '&section=exercises">' +
-                  svgIcon('pencil') + ' صفحة التمارين (' + exs.length + ')' +
-                '</a>' +
-                '<a class="btn btn-sm" href="unit.html?unit=' + encodeURIComponent(u.id) + '">' +
-                  svgIcon('layers') + ' فتح الوحدة' +
-                '</a>' +
-              '</div>' +
-            '</div>' +
-          '</article>';
+          return '<a class="row-card ' + (subject.color ? 'c-' + subject.color : '') + '" href="unit.html?unit=' + encodeURIComponent(u.id) + '">' +
+            '<div class="num">' + (i + 1) + '</div>' +
+            '<div class="info"><div class="t">' + escapeHtml(u.title) + '</div>' +
+            '<div class="badges">' +
+              '<span class="badge' + (ls.length ? ' on' : '') + '">' + svgIcon('film') + ' ' + ls.length + ' دروس</span>' +
+              '<span class="badge' + (exs.length ? ' on' : '') + '">' + svgIcon('pencil') + ' ' + exs.length + ' تمارين</span>' +
+              (doneCount ? '<span class="badge done-badge">' + svgIcon('check-circle') + ' مكتمل ' + doneCount + '/' + totalCount + '</span>' : '') +
+            '</div></div>' +
+            '<div class="arrow">‹</div>' +
+          '</a>';
         }).join('');
-
-        $all('[data-unit-acc]', listEl).forEach(function (card) {
-          var trigger = card.querySelector('.unit-acc-trigger');
-          var panel = card.querySelector('.unit-acc-panel');
-          var arrBtn = card.querySelector('[data-toggle-unit]');
-          function toggleUnit() {
-            var nowOpen = panel.hidden;
-            panel.hidden = !nowOpen;
-            card.classList.toggle('is-open', nowOpen);
-            card.classList.toggle('is-collapsed', !nowOpen);
-            trigger.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
-            if (arrBtn) {
-              arrBtn.classList.toggle('open', nowOpen);
-              var sp = arrBtn.querySelector('span');
-              if (sp) sp.textContent = nowOpen ? 'إخفاء' : 'إظهار المحتوى';
-            }
-          }
-          trigger.addEventListener('click', function (e) {
-            if (e.target.closest('a')) return;
-            toggleUnit();
-          });
-          trigger.addEventListener('keydown', function (e) {
-            if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleUnit(); }
-          });
-        });
       }
 
       $('#logoutBtn').addEventListener('click', doLogout);
