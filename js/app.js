@@ -160,12 +160,23 @@ function resetData() {
 
 function getSubject(data, id) { return data.subjects.find(function (s) { return s.id === id; }) || null; }
 function getUnit(data, id)    { return data.units.find(function (u) { return u.id === id; }) || null; }
-function getLesson(data, id) { return data.lessons.find(function (l) { return l.id === id; }) || null; }
+function getLesson(data, id)  { return data.lessons.find(function (l) { return l.id === id; }) || null; }
+
+/* هل العنصر في جدول lessons عبارة عن تمرين مستقل داخل الوحدة أم درس عادي؟ */
+function isExerciseItem(item) {
+  return !!(item && (item.itemType === 'exercise' || String(item.id || '').indexOf('ex-') === 0));
+}
 
 function unitsOf(data, subjectId) {
   return data.units.filter(function (u) { return u.subjectId === subjectId; }).sort(byOrder);
 }
 function lessonsOf(data, unitId) {
+  return data.lessons.filter(function (l) { return l.unitId === unitId && !isExerciseItem(l); }).sort(byOrder);
+}
+function unitExercisesOf(data, unitId) {
+  return data.lessons.filter(function (l) { return l.unitId === unitId && isExerciseItem(l); }).sort(byOrder);
+}
+function allUnitItemsOf(data, unitId) {
   return data.lessons.filter(function (l) { return l.unitId === unitId; }).sort(byOrder);
 }
 function resourcesOf(data, lessonId, kind) {
@@ -178,7 +189,7 @@ function lessonPath(data, lessonId) {
   if (!lesson) return null;
   var unit = getUnit(data, lesson.unitId);
   var subject = unit ? getSubject(data, unit.subjectId) : null;
-  return { lesson: lesson, unit: unit, subject: subject };
+  return { lesson: lesson, unit: unit, subject: subject, isExercise: isExerciseItem(lesson) };
 }
 
 /* ============ الحماية والدخول ============ */

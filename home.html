@@ -74,11 +74,12 @@
       grid.innerHTML = list.map(function (s) {
         var units = unitsOf(data, s.id);
         var lessonCount = units.reduce(function (n, u) { return n + lessonsOf(data, u.id).length; }, 0);
+        var exCount = units.reduce(function (n, u) { return n + unitExercisesOf(data, u.id).length; }, 0);
         return '<a class="subject-card ' + (s.color ? 'c-' + s.color : '') + '" href="subject.html?subject=' + encodeURIComponent(s.id) + '">' +
           '<span class="arrow">‹</span>' +
           '<div class="icon">' + iconHTML(s.icon, 'book') + '</div>' +
           '<div class="name">' + escapeHtml(s.name) + '</div>' +
-          '<div class="meta">' + units.length + ' وحدات · ' + lessonCount + ' دروس</div>' +
+          '<div class="meta">' + units.length + ' وحدات · ' + lessonCount + ' دروس' + (exCount ? ' · ' + exCount + ' تمارين' : '') + '</div>' +
         '</a>';
       }).join('');
     }

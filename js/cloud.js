@@ -138,7 +138,18 @@ Cloud._sync = function (data) {
   tables.forEach(function (t) {
     if (!t.rows.length) return;
     jobs.push(c.from(t.name).upsert(t.rows, { onConflict: 'id' }).then(function (res) {
-      if (res && res.error) throw new Error(t.name + ': ' + res.error.message);
+      if (res && res.error) {
+        /* توافق رجعي آمن إذا لم يُضف عمود item_type بعد في قاعدة خارجية قديمة */
+        if (t.name === 'lessons' && /item_type/i.test(String(res.error.message || ''))) {
+          var legacyRows = t.rows.map(function (r) {
+            return { id: r.id, unit_id: r.unit_id, title: r.title, sort_order: r.sort_order };
+          });
+          return c.from(t.name).upsert(legacyRows, { onConflict: 'id' }).then(function (res2) {
+            if (res2 && res2.error) throw new Error(t.name + ': ' + res2.error.message);
+          });
+        }
+        throw new Error(t.name + ': ' + res.error.message);
+      }
     }));
   });
 
@@ -213,7 +224,10 @@ Cloud.removeFile = function (path) {
 /* ============ التحويل بين صيغة التطبيق وصيغة قاعدة البيانات ============ */
 function subjectToRow(s)  { return { id: s.id, name: s.name, icon: s.icon || 'book', color: s.color || 'indigo', sort_order: s.order || 0 }; }
 function unitToRow(u)     { return { id: u.id, subject_id: u.subjectId, title: u.title, sort_order: u.order || 0 }; }
-function lessonToRow(l)   { return { id: l.id, unit_id: l.unitId, title: l.title, sort_order: l.order || 0 }; }
+function lessonToRow(l) {
+  var isEx = (typeof isExerciseItem === 'function') ? isExerciseItem(l) : (l.itemType === 'exercise' || String(l.id || '').indexOf('ex-') === 0);
+  return { id: l.id, unit_id: l.unitId, title: l.title, item_type: isEx ? 'exercise' : 'lesson', sort_order: l.order || 0 };
+}
 function resourceToRow(r) {
   return {
     id: r.id, lesson_id: r.lessonId, kind: r.kind,
@@ -223,7 +237,10 @@ function resourceToRow(r) {
 }
 function rowToSubject(r)  { return { id: r.id, name: r.name, icon: r.icon, color: r.color, order: r.sort_order }; }
 function rowToUnit(r)     { return { id: r.id, subjectId: r.subject_id, title: r.title, order: r.sort_order }; }
-function rowToLesson(r)   { return { id: r.id, unitId: r.unit_id, title: r.title, order: r.sort_order }; }
+function rowToLesson(r) {
+  var isEx = r.item_type === 'exercise' || String(r.id || '').indexOf('ex-') === 0;
+  return { id: r.id, unitId: r.unit_id, title: r.title, itemType: isEx ? 'exercise' : 'lesson', order: r.sort_order };
+}
 function rowToResource(r) {
   return {
     id: r.id, lessonId: r.lesson_id, kind: r.kind, title: r.title,

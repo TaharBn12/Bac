@@ -269,7 +269,7 @@ AyaPlayer.prototype.toYoutubeMode = function (ytId, title) {
   this.box.insertBefore(ifr, this.box.firstChild);
 };
 
-/* ============ بناء صفحة الدرس ============ */
+/* ============ بناء صفحة الدرس / التمرين ============ */
 function initLessonPage() {
   requireAuth();
   hydrateIcons();
@@ -278,26 +278,52 @@ function initLessonPage() {
   var lesson = getLesson(data, param('lesson'));
   if (!lesson) { location.replace('home.html'); return; }
 
+  var isExPage = typeof isExerciseItem === 'function' && isExerciseItem(lesson);
   var path = lessonPath(data, lesson.id);
-  var subject = path.subject || { name: 'مادة', color: '', icon: 'book' };
-  var unit = path.unit || { title: 'وحدة' };
+  var subject = path.subject || { id: '', name: 'مادة', color: '', icon: 'book' };
+  var unit = path.unit || { id: '', title: 'وحدة' };
+
+  document.title = 'آية باك 2027 — ' + lesson.title;
 
   /* مسار التنقل + العنوان */
+  var unitBaseHref = 'unit.html?unit=' + encodeURIComponent(unit.id);
   $('#crumbs').innerHTML = breadcrumb([
     { label: 'الرئيسية', href: 'home.html', icon: 'home' },
     { label: subject.name, href: 'subject.html?subject=' + encodeURIComponent(subject.id) },
-    { label: unit.title, href: 'unit.html?unit=' + encodeURIComponent(unit.id) },
+    { label: unit.title, href: unitBaseHref },
+    { label: isExPage ? 'التمارين' : 'الدروس', href: unitBaseHref + '&section=' + (isExPage ? 'exercises' : 'lessons') },
     { label: lesson.title }
   ]);
-  $('#lessonTitle').innerHTML = iconHTML(subject.icon, 'film') + ' ' + escapeHtml(lesson.title);
+  $('#lessonTitle').innerHTML =
+    (isExPage ? svgIcon('pencil') : iconHTML(subject.icon, 'film')) + ' ' + escapeHtml(lesson.title);
 
-  var player = new AyaPlayer($('#playerShell'));
+  if (isExPage) {
+    var pdfH2 = $('#pdfSection > h2');
+    if (pdfH2) pdfH2.innerHTML = svgIcon('file') + ' ملفات التمرين والحل PDF';
+    var imgH2 = $('#imgSection > h2');
+    if (imgH2) imgH2.innerHTML = svgIcon('image') + ' صور التمرين والحل';
+    var emptyEl = $('#emptyAll');
+    if (emptyEl) emptyEl.textContent = 'هذا التمرين لا يحتوي على محتوى بعد';
+  }
 
-  /* ---- الفيديوهات ---- */
   var videos = resourcesOf(data, lesson.id, 'video');
+  var pdfs   = resourcesOf(data, lesson.id, 'pdf');
+  var images = resourcesOf(data, lesson.id, 'image');
+  var exs    = resourcesOf(data, lesson.id, 'exercise');
+
+  var player = null;
+  var shellEl = $('#playerShell');
   var tabsEl = $('#videoTabs');
 
+  function ensurePlayer() {
+    shellEl.hidden = false;
+    if (!player) player = new AyaPlayer(shellEl);
+    return player;
+  }
+
+  /* ---- الفيديوهات ---- */
   if (videos.length) {
+    ensurePlayer();
     tabsEl.innerHTML = videos.map(function (v, i) {
       return '<button class="vtab' + (i === 0 ? ' active' : '') + '" data-i="' + i + '">' +
         escapeHtml((i + 1) + '. ' + (v.title || 'فيديو')) + '</button>';
@@ -308,36 +334,40 @@ function initLessonPage() {
       if (!btn) return;
       $all('.vtab', tabsEl).forEach(function (t) { t.classList.remove('active'); });
       btn.classList.add('active');
-      player.load(videos[+btn.dataset.i]);
-      $('#playerShell').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      ensurePlayer().load(videos[+btn.dataset.i]);
+      shellEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
 
     player.load(videos[0]);
+  } else if (isExPage || (!pdfs.length && !images.length && !exs.length)) {
+    /* في صفحة التمرين المستقل (أو عند الفراغ التام) نخفي المشغل إن لم يُضف له فيديو ليبقى عرض PDF/الصور أنيقاً */
+    shellEl.hidden = true;
+    tabsEl.hidden = true;
   } else {
-    $('#playerShell').innerHTML =
+    shellEl.innerHTML =
       '<div class="player"><div class="player-error" style="position:relative;display:grid">' +
       '<div>' + svgIcon('film') + ' لا توجد فيديوهات في هذا الدرس بعد</div>' +
       '</div></div>';
   }
 
   /* ---- ملفات PDF ---- */
-  var pdfs = resourcesOf(data, lesson.id, 'pdf');
   var pdfEl = $('#pdfGrid');
   if (pdfs.length) {
+    var pdfKindLabel = isExPage ? 'ملف التمرين PDF' : 'ملخص PDF';
     pdfs.forEach(function (p) {
       resolveSrc(p.url).then(function (res) {
         if (res.kind === 'error') return;
         var card = document.createElement('article');
-        var summaryName = p.title || res.fileName || 'ملخص PDF';
+        var summaryName = p.title || res.fileName || pdfKindLabel;
         card.className = 'pdf-card';
         /* لا نعرض الرابط إطلاقاً: الاسم الذي يضعه المدير هو النص الوحيد الظاهر. */
         card.innerHTML =
           '<div class="pdf-ico">' + svgIcon('file') + '</div>' +
           '<div class="pdf-copy"><div class="t" title="' + escapeHtml(summaryName) + '">' + escapeHtml(summaryName) + '</div>' +
-            '<span class="pdf-kind">ملخص PDF</span></div>' +
-          '<div class="acts" aria-label="خيارات الملخص">' +
-            '<a class="btn btn-icon" target="_blank" rel="noopener" href="' + escapeHtml(res.src) + '" title="مشاهدة الملخص" aria-label="مشاهدة ' + escapeHtml(summaryName) + '">' + svgIcon('eye') + '</a>' +
-            '<a class="btn btn-icon" download="' + escapeHtml(res.fileName || summaryName + '.pdf') + '" href="' + escapeHtml(res.src) + '" title="تنزيل الملخص" aria-label="تنزيل ' + escapeHtml(summaryName) + '">' + svgIcon('download') + '</a>' +
+            '<span class="pdf-kind">' + pdfKindLabel + '</span></div>' +
+          '<div class="acts" aria-label="خيارات الملف">' +
+            '<a class="btn btn-icon" target="_blank" rel="noopener" href="' + escapeHtml(res.src) + '" title="مشاهدة الملف" aria-label="مشاهدة ' + escapeHtml(summaryName) + '">' + svgIcon('eye') + '</a>' +
+            '<a class="btn btn-icon" download="' + escapeHtml(res.fileName || summaryName + '.pdf') + '" href="' + escapeHtml(res.src) + '" title="تنزيل الملف" aria-label="تنزيل ' + escapeHtml(summaryName) + '">' + svgIcon('download') + '</a>' +
           '</div>';
         pdfEl.appendChild(card);
       });
@@ -346,12 +376,58 @@ function initLessonPage() {
     $('#pdfSection').style.display = 'none';
   }
 
-  /* ---- الصور ---- */
-  var images = resourcesOf(data, lesson.id, 'image');
+  /* ---- عارض الصور الموحّد (لصور المعرض + تمارين الصور) ---- */
   var galEl = $('#imgGallery');
   var lb = $('#lightbox');
   var lbImg = $('#lbImg'), lbCap = $('#lbCap');
   var resolvedImages = [];
+  var lightboxBound = false;
+
+  function bindLightboxControls() {
+    if (lightboxBound) return;
+    lightboxBound = true;
+    $('#lbClose').addEventListener('click', function () { lb.classList.remove('open'); });
+    lb.addEventListener('click', function (e) { if (e.target === lb) lb.classList.remove('open'); });
+    $('#lbPrev').addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (!resolvedImages.length) return;
+      var i = (+lb.dataset.i - 1 + resolvedImages.length) % resolvedImages.length;
+      openLightboxAt(i);
+    });
+    $('#lbNext').addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (!resolvedImages.length) return;
+      var i = (+lb.dataset.i + 1) % resolvedImages.length;
+      openLightboxAt(i);
+    });
+    document.addEventListener('keydown', function (e) {
+      if (!lb.classList.contains('open')) return;
+      if (e.key === 'Escape') lb.classList.remove('open');
+      if (e.key === 'ArrowLeft' && resolvedImages.length > 1) $('#lbPrev').click();
+      if (e.key === 'ArrowRight' && resolvedImages.length > 1) $('#lbNext').click();
+    });
+  }
+
+  function openLightboxAt(i) {
+    if (!resolvedImages[i]) return;
+    bindLightboxControls();
+    lbImg.src = resolvedImages[i].src;
+    lbCap.textContent = resolvedImages[i].title;
+    lb.dataset.i = i;
+    $('#lbPrev').hidden = resolvedImages.length <= 1;
+    $('#lbNext').hidden = resolvedImages.length <= 1;
+    lb.classList.add('open');
+  }
+
+  function openSingleImageInLightbox(src, title) {
+    bindLightboxControls();
+    lbImg.src = src;
+    lbCap.textContent = title || '';
+    lb.dataset.i = '0';
+    $('#lbPrev').hidden = true;
+    $('#lbNext').hidden = true;
+    lb.classList.add('open');
+  }
 
   if (images.length) {
     images.forEach(function (img) {
@@ -373,42 +449,15 @@ function initLessonPage() {
           thumb.querySelector('.ic').style.cssText = 'width:34px;height:34px;opacity:.55';
         };
         im.src = res.src;
-        thumb.addEventListener('click', function () { openLightbox(idx); });
+        thumb.addEventListener('click', function () { openLightboxAt(idx); });
         galEl.appendChild(thumb);
       });
-    });
-
-    function openLightbox(i) {
-      lbImg.src = resolvedImages[i].src;
-      lbCap.textContent = resolvedImages[i].title;
-      lb.dataset.i = i;
-      lb.classList.add('open');
-    }
-
-    $('#lbClose').addEventListener('click', function () { lb.classList.remove('open'); });
-    lb.addEventListener('click', function (e) { if (e.target === lb) lb.classList.remove('open'); });
-    $('#lbPrev').addEventListener('click', function (e) {
-      e.stopPropagation();
-      var i = (+lb.dataset.i - 1 + resolvedImages.length) % resolvedImages.length;
-      openLightbox(i);
-    });
-    $('#lbNext').addEventListener('click', function (e) {
-      e.stopPropagation();
-      var i = (+lb.dataset.i + 1) % resolvedImages.length;
-      openLightbox(i);
-    });
-    document.addEventListener('keydown', function (e) {
-      if (!lb.classList.contains('open')) return;
-      if (e.key === 'Escape') lb.classList.remove('open');
-      if (e.key === 'ArrowLeft') $('#lbPrev').click();
-      if (e.key === 'ArrowRight') $('#lbNext').click();
     });
   } else {
     $('#imgSection').style.display = 'none';
   }
 
-  /* ---- التمارين ---- */
-  var exs = resourcesOf(data, lesson.id, 'exercise');
+  /* ---- التمارين المرفقة بالدرس ---- */
   var exEl = $('#exBtns');
   if (exs.length) {
     exs.forEach(function (ex) {
@@ -418,17 +467,24 @@ function initLessonPage() {
       btn.type = 'button';
       btn.className = 'ex-btn ex-' + type;
       btn.setAttribute('aria-label', 'فتح ' + exerciseTitle);
-      var ico = svgIcon(type === 'video' ? 'film' : (type === 'pdf' ? 'file' : 'link'));
-      var kindLbl = type === 'video' ? 'فيديو تطبيقي' : (type === 'pdf' ? 'تمرين PDF' : 'رابط تطبيقي');
+      var ico = svgIcon(type === 'video' ? 'film' : (type === 'pdf' ? 'file' : (type === 'image' ? 'image' : 'link')));
+      var kindLbl = type === 'video' ? 'فيديو تطبيقي'
+        : (type === 'pdf' ? 'تمرين PDF' : (type === 'image' ? 'تمرين مصوّر' : 'رابط تطبيقي'));
       btn.innerHTML = '<span class="ex-icon">' + ico + '</span>' +
         '<span class="ex-copy"><strong>' + escapeHtml(exerciseTitle) + '</strong><small>' + kindLbl + '</small></span>' +
         '<span class="ex-go" aria-hidden="true">' + svgIcon('chevron-left') + '</span>';
       btn.addEventListener('click', function () {
-        if (type === 'video' && document.getElementById('vpBox')) {
+        if (type === 'video') {
           /* تمرين فيديو → نشغّله في المشغل الرئيسي */
-          player.load({ title: ex.title || 'تمرين', url: ex.url });
+          var p = ensurePlayer();
+          p.load({ title: ex.title || 'تمرين', url: ex.url });
           $all('.vtab', tabsEl).forEach(function (t) { t.classList.remove('active'); });
-          $('#playerShell').scrollIntoView({ behavior: 'smooth', block: 'start' });
+          shellEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        } else if (type === 'image') {
+          resolveSrc(ex.url).then(function (res) {
+            if (res.kind === 'error') { toast(res.message, 'err'); return; }
+            openSingleImageInLightbox(res.src, exerciseTitle);
+          });
         } else {
           resolveSrc(ex.url).then(function (res) {
             if (res.kind === 'error') { toast(res.message, 'err'); return; }
@@ -443,7 +499,7 @@ function initLessonPage() {
     $('#exSection').style.display = 'none';
   }
 
-  /* إذا كان الدرس فارغاً تماماً نعرض رابط إضافة المحتوى */
+  /* إذا كان الدرس أو التمرين فارغاً تماماً نعرض تنبيه الفراغ */
   if (!videos.length && !pdfs.length && !images.length && !exs.length) {
     $('#emptyAll').hidden = false;
   }

@@ -17,7 +17,7 @@ var KIND_META = {
 };
 
 var data, currentTab = 'subjects';
-var sel = { subject: '', unit: '', lesson: '' };
+var sel = { subject: '', unit: '', lesson: '', exercise: '' };
 var pickedFiles = {}; /* ملفات مختارة مؤقتاً في نماذج الإضافة: pickedFiles[key] = File */
 
 function initAdmin() {
@@ -72,16 +72,23 @@ function showApp() {
 
     updateCloudBadge();
 
-    /* رابط مباشر لتبويب معين مثل admin.html?tab=ai أو درس admin.html?lesson=xxx */
+    /* رابط مباشر لتبويب معين مثل admin.html?tab=ai أو درس/تمرين admin.html?lesson=xxx */
     var requestedTab = param('tab');
-    var lessonId = param('lesson');
-    if (lessonId && getLesson(data, lessonId)) {
-      var path = lessonPath(data, lessonId);
+    var targetItemId = param('exercise') || param('lesson');
+    if (targetItemId && getLesson(data, targetItemId)) {
+      var path = lessonPath(data, targetItemId);
       if (path.subject && path.unit) {
         sel.subject = path.subject.id;
         sel.unit = path.unit.id;
-        sel.lesson = path.lesson.id;
-        currentTab = 'content';
+        if (path.isExercise) {
+          sel.exercise = path.lesson.id;
+          sel.lesson = (lessonsOf(data, sel.unit)[0] || {}).id || '';
+          currentTab = 'exercises';
+        } else {
+          sel.lesson = path.lesson.id;
+          sel.exercise = (unitExercisesOf(data, sel.unit)[0] || {}).id || '';
+          currentTab = 'content';
+        }
       }
     } else {
       var s0 = data.subjects.slice().sort(byOrder)[0];
@@ -90,6 +97,8 @@ function showApp() {
       if (u0) sel.unit = u0.id;
       var l0 = u0 ? lessonsOf(data, u0.id)[0] : null;
       if (l0) sel.lesson = l0.id;
+      var ex0 = u0 ? unitExercisesOf(data, u0.id)[0] : null;
+      if (ex0) sel.exercise = ex0.id;
       if (requestedTab && $('[data-tab="' + requestedTab + '"]')) {
         currentTab = requestedTab;
       }
@@ -226,6 +235,12 @@ function lessonOptions(unitId, selectedId) {
     return '<option value="' + l.id + '"' + (l.id === selectedId ? ' selected' : '') + '>' + escapeHtml(l.title) + '</option>';
   }).join('');
 }
+function unitExerciseOptions(unitId, selectedId) {
+  var exs = unitId ? unitExercisesOf(data, unitId) : [];
+  return '<option value="">— اختر التمرين —</option>' + exs.map(function (ex) {
+    return '<option value="' + ex.id + '"' + (ex.id === selectedId ? ' selected' : '') + '>' + escapeHtml(ex.title) + '</option>';
+  }).join('');
+}
 
 function actsHTML(id, extra) {
   return '<div class="item-acts">' +
@@ -237,19 +252,22 @@ function actsHTML(id, extra) {
   '</div>';
 }
 
-/* التقاط أزرار القوائم (تعديل/حذف/ترتيب) بشكل مركزي */
+/* التقاط أزرار القوائم (تعديل/حذف/ترتيب/نسخ) بشكل مركزي */
 function bindList(container, handlers) {
+  if (!container) return;
   container.addEventListener('click', function (e) {
     var btn = e.target.closest('[data-act]');
     if (!btn) return;
     var act = btn.dataset.act, id = btn.dataset.id;
-    if (act === 'up') handlers.up(id);
-    else if (act === 'down') handlers.down(id);
-    else if (act === 'rename') handlers.rename(id);
-    else if (act === 'del') handlers.del(id);
+    if (act === 'up' && handlers.up) handlers.up(id);
+    else if (act === 'down' && handlers.down) handlers.down(id);
+    else if (act === 'rename' && handlers.rename) handlers.rename(id);
+    else if (act === 'del' && handlers.del) handlers.del(id);
     else if (act === 'copy' && handlers.copy) handlers.copy(id);
+    else if (act === 'copy-all-unit' && handlers.copyAllUnit) handlers.copyAllUnit(id);
     else if (act === 'view' && handlers.view) handlers.view(id);
     else if (act === 'goto' && handlers.goto) handlers.goto(id);
+    else if (act === 'select' && handlers.select) handlers.select(id);
   });
 }
 
@@ -263,15 +281,27 @@ function bindFilePickers(root) {
   $all('input[data-pick]', root).forEach(function (inp) {
     inp.addEventListener('change', function () {
       var key = inp.dataset.pick;
-      pickedFiles[key] = inp.files[0] || null;
+      var file = inp.files[0] || null;
+      pickedFiles[key] = file;
       var lbl = $('[data-picked="' + key + '"]', root);
-      if (lbl) lbl.innerHTML = pickedFiles[key]
-        ? svgIcon('check') + ' ' + escapeHtml(pickedFiles[key].name) + ' (' + fmtSize(pickedFiles[key].size) + ')'
+      if (lbl) lbl.innerHTML = file
+        ? svgIcon('check') + ' ' + escapeHtml(file.name) + ' (' + fmtSize(file.size) + ')'
         : '';
       /* نملأ العنوان تلقائياً باسم الملف إن كان فارغاً */
       var titleInp = $('input[data-title="' + key + '"]', root);
-      if (pickedFiles[key] && titleInp && !titleInp.value.trim()) {
-        titleInp.value = pickedFiles[key].name.replace(/\.[^.]+$/, '');
+      if (file && titleInp && !titleInp.value.trim()) {
+        titleInp.value = file.name.replace(/\.[^.]+$/, '');
+      }
+      /* في قسم التمارين المرفقة بالدرس: نضبط نوع التمرين تلقائياً حسب نوع الملف المختار */
+      if (file && key === 'exercise') {
+        var exSel = $('#ex-type', root);
+        if (exSel) {
+          var mime = String(file.type || '').toLowerCase();
+          var fname = String(file.name || '').toLowerCase();
+          if (mime.indexOf('video/') === 0 || /\.(mp4|webm|ogg|mov|mkv)$/i.test(fname)) exSel.value = 'video';
+          else if (mime.indexOf('image/') === 0 || /\.(png|jpe?g|webp|gif|svg)$/i.test(fname)) exSel.value = 'image';
+          else if (mime === 'application/pdf' || /\.pdf$/i.test(fname)) exSel.value = 'pdf';
+        }
       }
     });
   });
@@ -371,12 +401,46 @@ function copyResourcesToLesson(sourceLessonId, targetLessonId) {
   });
 }
 
-function duplicateLesson(id) {
+/* نسخ مورد واحد إلى قائمة دروس أو تمارين مستهدفة دون تكرار إذا كان المورد موجوداً فيها مسبقاً. */
+function copySingleResourceToTargets(resource, targets) {
+  var added = 0, skipped = 0;
+  (targets || []).forEach(function (t) {
+    if (!t || !t.id || t.id === resource.lessonId) return;
+    var existing = resourcesOf(data, t.id, resource.kind);
+    var already = existing.some(function (x) {
+      return x.url === resource.url && (resource.kind !== 'exercise' || (x.exerciseType || '') === (resource.exerciseType || ''));
+    });
+    if (already) { skipped++; return; }
+    var maxOrder = existing.reduce(function (m, r) { return Math.max(m, r.order || 0); }, 0);
+    data.resources.push({
+      id: uid('r'),
+      lessonId: t.id,
+      kind: resource.kind,
+      title: resource.title || '',
+      url: resource.url,
+      size: resource.size || undefined,
+      exerciseType: resource.exerciseType || undefined,
+      order: maxOrder + 1
+    });
+    added++;
+  });
+  return { added: added, skipped: skipped };
+}
+
+function duplicateLesson(id, targetUnitId) {
   var l = getLesson(data, id);
   if (!l) return null;
-  var nid = uid('l');
-  var maxOrder = lessonsOf(data, l.unitId).reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0);
-  data.lessons.push({ id: nid, unitId: l.unitId, title: l.title + ' (نسخة)', order: maxOrder + 1 });
+  var isEx = isExerciseItem(l);
+  var uId = targetUnitId || l.unitId;
+  var nid = uid(isEx ? 'ex' : 'l');
+  var siblings = isEx ? unitExercisesOf(data, uId) : lessonsOf(data, uId);
+  var maxOrder = siblings.reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0);
+  data.lessons.push({
+    id: nid, unitId: uId,
+    title: l.title + (uId === l.unitId ? ' (نسخة)' : ''),
+    itemType: isEx ? 'exercise' : 'lesson',
+    order: maxOrder + 1
+  });
   copyResourcesToLesson(l.id, nid);
   save();
   return nid;
@@ -389,9 +453,14 @@ function duplicateUnit(id, targetSubjectId, deferSave) {
   var nid = uid('u');
   var maxOrder = unitsOf(data, subjectId).reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0);
   data.units.push({ id: nid, subjectId: subjectId, title: u.title + ' (نسخة)', order: maxOrder + 1 });
-  lessonsOf(data, id).forEach(function (l) {
-    var newLessonId = uid('l');
-    data.lessons.push({ id: newLessonId, unitId: nid, title: l.title, order: l.order });
+  allUnitItemsOf(data, id).forEach(function (l) {
+    var isEx = isExerciseItem(l);
+    var newLessonId = uid(isEx ? 'ex' : 'l');
+    data.lessons.push({
+      id: newLessonId, unitId: nid, title: l.title,
+      itemType: isEx ? 'exercise' : 'lesson',
+      order: l.order
+    });
     copyResourcesToLesson(l.id, newLessonId);
   });
   if (!deferSave) save();
@@ -417,6 +486,7 @@ function renderPanel() {
   else if (currentTab === 'organizer') renderOrganizerPanel(p);
   else if (currentTab === 'units') renderUnitsPanel(p);
   else if (currentTab === 'lessons') renderLessonsPanel(p);
+  else if (currentTab === 'exercises') renderExercisesPanel(p);
   else if (currentTab === 'content') renderContentPanel(p);
   else if (currentTab === 'backup') renderBackupPanel(p);
   var banner = cloudBannerHTML();
@@ -424,7 +494,7 @@ function renderPanel() {
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-/* ---------- منظّم المحتوى: رؤية كاملة للمادة ← الوحدة ← الدرس ---------- */
+/* ---------- منظّم المحتوى: رؤية كاملة للمادة ← الوحدة ← الدرس / التمرين ---------- */
 function goToAdminTab(tab) {
   currentTab = tab;
   $all('.tab').forEach(function (x) { x.classList.toggle('active', x.dataset.tab === tab); });
@@ -466,9 +536,30 @@ function openQuickLessonDialog(unitId) {
       var title = v.title.trim();
       if (!title) { toast('اكتب عنوان الدرس', 'err'); return; }
       var id = uid('l');
-      data.lessons.push({ id: id, unitId: unitId, title: title, order: nextOrder });
+      data.lessons.push({ id: id, unitId: unitId, title: title, itemType: 'lesson', order: nextOrder });
       setItemOrder(lessonsOf(data, unitId), id, v.order);
       save(); renderPanel(); toast('تمت إضافة الدرس');
+    }
+  });
+}
+
+function openQuickExerciseDialog(unitId) {
+  var unit = getUnit(data, unitId);
+  if (!unit) return;
+  var nextOrder = unitExercisesOf(data, unitId).length + 1;
+  openEditDialog({
+    title: 'إضافة تمرين إلى ' + unit.title, icon: 'pencil',
+    fields: [
+      { key: 'title', label: 'عنوان التمرين', placeholder: 'مثال: التمرين الأول / سلسلة تمارين رقم 1' },
+      { key: 'order', label: 'موضعه في ترتيب التمارين', type: 'number', value: nextOrder }
+    ],
+    onSave: function (v) {
+      var title = v.title.trim();
+      if (!title) { toast('اكتب عنوان التمرين', 'err'); return; }
+      var id = uid('ex');
+      data.lessons.push({ id: id, unitId: unitId, title: title, itemType: 'exercise', order: nextOrder });
+      setItemOrder(unitExercisesOf(data, unitId), id, v.order);
+      save(); renderPanel(); toast('تمت إضافة التمرين');
     }
   });
 }
@@ -495,7 +586,7 @@ function openCreatePathDialog() {
         order: data.subjects.length + 1
       });
       data.units.push({ id: unitId, subjectId: subjectId, title: unitTitle, order: 1 });
-      data.lessons.push({ id: lessonId, unitId: unitId, title: lessonTitle, order: 1 });
+      data.lessons.push({ id: lessonId, unitId: unitId, title: lessonTitle, itemType: 'lesson', order: 1 });
       save(); renderPanel(); toast('تم إنشاء المادة والوحدة والدرس');
     }
   });
@@ -503,29 +594,44 @@ function openCreatePathDialog() {
 
 function treeUnitHTML(unit) {
   var lessons = lessonsOf(data, unit.id);
-  var subject = getSubject(data, unit.subjectId);
-  var unitSearch = (unit.title + ' ' + lessons.map(function (l) { return l.title; }).join(' ')).toLocaleLowerCase();
+  var exercises = unitExercisesOf(data, unit.id);
+  var allTitles = lessons.concat(exercises).map(function (l) { return l.title; }).join(' ');
+  var unitSearch = (unit.title + ' ' + allTitles).toLocaleLowerCase();
   return '<details class="tree-unit" open data-search="' + escapeHtml(unitSearch) + '">' +
     '<summary><span class="tree-label"><span class="tree-dot"></span>' + escapeHtml(unit.title) + '</span>' +
-      '<span class="tree-meta">' + lessons.length + ' درس</span></summary>' +
+      '<span class="tree-meta">' + lessons.length + ' درس · ' + exercises.length + ' تمرين</span></summary>' +
     '<div class="tree-node-body">' +
       '<div class="tree-actions">' +
         '<button type="button" class="tree-action" data-organizer-act="add-lesson" data-id="' + unit.id + '">' + svgIcon('plus') + ' إضافة درس</button>' +
+        '<button type="button" class="tree-action" data-organizer-act="add-exercise" data-id="' + unit.id + '">' + svgIcon('pencil') + ' إضافة تمرين</button>' +
         '<button type="button" class="tree-action" data-organizer-act="manage-unit" data-id="' + unit.id + '">' + svgIcon('gear') + ' إدارة الوحدة</button>' +
         '<button type="button" class="tree-action" data-organizer-act="copy-unit" data-id="' + unit.id + '">' + svgIcon('copy') + ' نسخ</button>' +
       '</div>' +
       '<div class="tree-lessons">' +
-        (lessons.length ? lessons.map(function (l) {
-          var resources = resourcesOf(data, l.id).length;
-          return '<article class="tree-lesson" data-search="' + escapeHtml(l.title.toLocaleLowerCase()) + '">' +
-            '<span class="tree-lesson-title">' + svgIcon('film') + ' ' + escapeHtml(l.title) +
-              '<span class="tree-meta">' + resources + ' محتوى</span></span>' +
-            '<span class="tree-actions">' +
-              '<button type="button" class="tree-action" data-organizer-act="manage-lesson" data-id="' + l.id + '">' + svgIcon('plus') + ' المحتوى</button>' +
-              '<button type="button" class="tree-action" data-organizer-act="preview-lesson" data-id="' + l.id + '" title="معاينة الدرس" aria-label="معاينة الدرس">' + svgIcon('eye') + '</button>' +
-            '</span>' +
-          '</article>';
-        }).join('') : '<div class="tree-empty">لا توجد دروس بعد — أضف أول درس من الزر أعلاه.</div>') +
+        (lessons.length || exercises.length ? (
+          lessons.map(function (l) {
+            var resources = resourcesOf(data, l.id).length;
+            return '<article class="tree-lesson" data-search="' + escapeHtml(l.title.toLocaleLowerCase()) + '">' +
+              '<span class="tree-lesson-title">' + svgIcon('film') + ' ' + escapeHtml(l.title) +
+                '<span class="tree-meta">درس · ' + resources + ' محتوى</span></span>' +
+              '<span class="tree-actions">' +
+                '<button type="button" class="tree-action" data-organizer-act="manage-lesson" data-id="' + l.id + '">' + svgIcon('plus') + ' المحتوى</button>' +
+                '<button type="button" class="tree-action" data-organizer-act="preview-lesson" data-id="' + l.id + '" title="معاينة الدرس" aria-label="معاينة الدرس">' + svgIcon('eye') + '</button>' +
+              '</span>' +
+            '</article>';
+          }).join('') +
+          exercises.map(function (ex) {
+            var resources = resourcesOf(data, ex.id).length;
+            return '<article class="tree-lesson tree-exercise" data-search="' + escapeHtml(ex.title.toLocaleLowerCase()) + '">' +
+              '<span class="tree-lesson-title">' + svgIcon('pencil') + ' ' + escapeHtml(ex.title) +
+                '<span class="tree-meta tree-meta-ex">تمرين · ' + resources + ' محتوى</span></span>' +
+              '<span class="tree-actions">' +
+                '<button type="button" class="tree-action" data-organizer-act="manage-exercise" data-id="' + ex.id + '">' + svgIcon('plus') + ' ملفات التمرين</button>' +
+                '<button type="button" class="tree-action" data-organizer-act="preview-lesson" data-id="' + ex.id + '" title="معاينة التمرين" aria-label="معاينة التمرين">' + svgIcon('eye') + '</button>' +
+              '</span>' +
+            '</article>';
+          }).join('')
+        ) : '<div class="tree-empty">لا توجد دروس أو تمارين بعد — أضف من الأزرار أعلاه.</div>') +
       '</div>' +
     '</div>' +
   '</details>';
@@ -534,12 +640,13 @@ function treeUnitHTML(unit) {
 function treeSubjectHTML(subject) {
   var units = unitsOf(data, subject.id);
   var lessonsCount = units.reduce(function (sum, u) { return sum + lessonsOf(data, u.id).length; }, 0);
+  var exercisesCount = units.reduce(function (sum, u) { return sum + unitExercisesOf(data, u.id).length; }, 0);
   var search = (subject.name + ' ' + units.map(function (u) {
-    return u.title + ' ' + lessonsOf(data, u.id).map(function (l) { return l.title; }).join(' ');
+    return u.title + ' ' + allUnitItemsOf(data, u.id).map(function (l) { return l.title; }).join(' ');
   }).join(' ')).toLocaleLowerCase();
   return '<details class="tree-subject" open data-search="' + escapeHtml(search) + '">' +
     '<summary><span class="tree-label tree-subject-label">' + iconHTML(subject.icon, 'book') + ' ' + escapeHtml(subject.name) + '</span>' +
-      '<span class="tree-meta">' + units.length + ' وحدة · ' + lessonsCount + ' درس</span></summary>' +
+      '<span class="tree-meta">' + units.length + ' وحدة · ' + lessonsCount + ' درس · ' + exercisesCount + ' تمرين</span></summary>' +
     '<div class="tree-node-body">' +
       '<div class="tree-actions">' +
         '<button type="button" class="tree-action primary" data-organizer-act="add-unit" data-id="' + subject.id + '">' + svgIcon('plus') + ' إضافة وحدة</button>' +
@@ -554,18 +661,22 @@ function treeSubjectHTML(subject) {
 }
 
 function renderOrganizerPanel(p) {
+  var totalLessons = data.lessons.filter(function (l) { return !isExerciseItem(l); }).length;
+  var totalExercises = data.lessons.filter(function (l) { return isExerciseItem(l); }).length;
+
   p.innerHTML =
     '<h2>' + svgIcon('layers') + ' منظّم المحتوى</h2>' +
-    '<p class="hint">عرض المادة ← الوحدة ← الدرس في مكان واحد. استخدمه للإضافة السريعة، البحث، النسخ أو الوصول المباشر إلى محتوى أي درس.</p>' +
+    '<p class="hint">عرض المادة ← الوحدة ← الدروس والتمارين في مكان واحد. استخدمه للإضافة السريعة، البحث، النسخ أو الوصول المباشر إلى محتوى أي درس أو تمرين.</p>' +
     '<div class="organizer-head">' +
       '<div class="organizer-stats">' +
         '<span>' + svgIcon('book') + ' ' + data.subjects.length + ' مادة</span>' +
         '<span>' + svgIcon('layers') + ' ' + data.units.length + ' وحدة</span>' +
-        '<span>' + svgIcon('film') + ' ' + data.lessons.length + ' درس</span>' +
+        '<span>' + svgIcon('film') + ' ' + totalLessons + ' درس</span>' +
+        '<span>' + svgIcon('pencil') + ' ' + totalExercises + ' تمرين</span>' +
       '</div>' +
       '<button type="button" class="btn btn-primary" id="buildPathBtn">' + svgIcon('sparkles') + ' بناء مادة ووحدة ودرس</button>' +
     '</div>' +
-    '<div class="organizer-search"><span>' + svgIcon('search') + '</span><input id="organizerSearch" type="search" placeholder="ابحث باسم مادة أو وحدة أو درس…" autocomplete="off"></div>' +
+    '<div class="organizer-search"><span>' + svgIcon('search') + '</span><input id="organizerSearch" type="search" placeholder="ابحث باسم مادة أو وحدة أو درس أو تمرين…" autocomplete="off"></div>' +
     '<div class="content-tree" id="contentTree">' +
       (data.subjects.length ? data.subjects.slice().sort(byOrder).map(treeSubjectHTML).join('') : '<div class="empty">لا توجد مواد بعد — ابدأ ببناء أول مسار تعليمي.</div>') +
     '</div>';
@@ -580,6 +691,7 @@ function renderOrganizerPanel(p) {
     var id = btn.dataset.id, action = btn.dataset.organizerAct;
     if (action === 'add-unit') openQuickUnitDialog(id);
     else if (action === 'add-lesson') openQuickLessonDialog(id);
+    else if (action === 'add-exercise') openQuickExerciseDialog(id);
     else if (action === 'manage-subject') { sel.subject = id; goToAdminTab('subjects'); }
     else if (action === 'manage-unit') {
       var unit = getUnit(data, id);
@@ -589,16 +701,21 @@ function renderOrganizerPanel(p) {
       if (path && path.subject && path.unit) {
         sel.subject = path.subject.id; sel.unit = path.unit.id; sel.lesson = id; goToAdminTab('content');
       }
+    } else if (action === 'manage-exercise') {
+      var exPath = lessonPath(data, id);
+      if (exPath && exPath.subject && exPath.unit) {
+        sel.subject = exPath.subject.id; sel.unit = exPath.unit.id; sel.exercise = id; goToAdminTab('exercises');
+      }
     } else if (action === 'preview-lesson') {
       window.open('lesson.html?lesson=' + encodeURIComponent(id), '_blank');
     } else if (action === 'copy-unit') {
       var unitToCopy = getUnit(data, id);
-      if (unitToCopy && confirm('نسخ وحدة "' + unitToCopy.title + '" مع كل دروسها ومحتواها؟')) {
+      if (unitToCopy && confirm('نسخ وحدة "' + unitToCopy.title + '" مع كل دروسها وتمارينها ومحتواها؟')) {
         duplicateUnit(id); renderPanel(); toast('تم إنشاء نسخة كاملة من الوحدة');
       }
     } else if (action === 'copy-subject') {
       var subjectToCopy = getSubject(data, id);
-      if (subjectToCopy && confirm('نسخ مادة "' + subjectToCopy.name + '" بكامل وحداتها ودروسها ومحتواها؟')) {
+      if (subjectToCopy && confirm('نسخ مادة "' + subjectToCopy.name + '" بكامل وحداتها ودروسها وتمارينها؟')) {
         duplicateSubject(id); renderPanel(); toast('تم إنشاء نسخة كاملة من المادة');
       }
     }
@@ -647,10 +764,12 @@ function renderSubjectsPanel(p) {
     '<div class="admin-list" id="subjList">' +
       (list.length ? list.map(function (s) {
         var units = unitsOf(data, s.id);
+        var lCount = units.reduce(function (n, u) { return n + lessonsOf(data, u.id).length; }, 0);
+        var exCount = units.reduce(function (n, u) { return n + unitExercisesOf(data, u.id).length; }, 0);
         return '<div class="item-row c-' + (s.color || 'indigo') + '">' +
           '<div class="item-ico">' + iconHTML(s.icon, 'book') + '</div>' +
           '<div class="item-info"><div class="item-title">' + escapeHtml(s.name) + '</div>' +
-          '<div class="item-sub">' + units.length + ' وحدة · ' + units.reduce(function (n, u) { return n + lessonsOf(data, u.id).length; }, 0) + ' درس</div></div>' +
+          '<div class="item-sub">' + units.length + ' وحدة · ' + lCount + ' درس · ' + exCount + ' تمرين</div></div>' +
           actsHTML(s.id, '<button class="icon-btn" data-act="copy" data-id="' + s.id + '" title="نسخ المادة بكل محتواها">' + svgIcon('copy') + '</button>') +
         '</div>';
       }).join('') : '<div class="empty">لا توجد مواد — أضف أول مادة أعلاه</div>') +
@@ -730,11 +849,12 @@ function renderUnitsPanel(p) {
     '<div class="admin-list" id="unitList">' +
       (list.length ? list.map(function (u, i) {
         var ls = lessonsOf(data, u.id);
+        var exs = unitExercisesOf(data, u.id);
         return '<div class="item-row">' +
           '<div class="item-ico">' + (i + 1) + '</div>' +
           '<div class="item-info"><div class="item-title">' + escapeHtml(u.title) + '</div>' +
-          '<div class="item-sub">' + ls.length + ' درس</div></div>' +
-          actsHTML(u.id, '<button class="icon-btn" data-act="copy" data-id="' + u.id + '" title="إنشاء نسخة (مع دروسها)">' + svgIcon('copy') + '</button>') +
+          '<div class="item-sub">' + ls.length + ' درس · ' + exs.length + ' تمرين</div></div>' +
+          actsHTML(u.id, '<button class="icon-btn" data-act="copy" data-id="' + u.id + '" title="إنشاء نسخة (مع دروسها وتمارينها)">' + svgIcon('copy') + '</button>') +
         '</div>';
       }).join('') : '<div class="empty">لا توجد وحدات في هذه المادة — أضف وحدة أعلاه</div>') +
     '</div>';
@@ -840,15 +960,15 @@ function renderLessonsPanel(p) {
     var t = $('#lTitle').value.trim();
     if (!t) { toast('اكتب عنوان الدرس', 'err'); return; }
     data.lessons.push({
-      id: uid('l'), unitId: sel.unit, title: t,
+      id: uid('l'), unitId: sel.unit, title: t, itemType: 'lesson',
       order: (lessonsOf(data, sel.unit).reduce(function (m, l) { return Math.max(m, l.order || 0); }, 0) + 1)
     });
     save(); renderPanel(); toast('تمت إضافة الدرس');
   });
 
   bindList($('#lessonList'), {
-    up: function (id) { moveItem(data.lessons.filter(function (l) { return l.unitId === sel.unit; }), id, -1); renderPanel(); },
-    down: function (id) { moveItem(data.lessons.filter(function (l) { return l.unitId === sel.unit; }), id, 1); renderPanel(); },
+    up: function (id) { moveItem(data.lessons.filter(function (l) { return l.unitId === sel.unit && !isExerciseItem(l); }), id, -1); renderPanel(); },
+    down: function (id) { moveItem(data.lessons.filter(function (l) { return l.unitId === sel.unit && !isExerciseItem(l); }), id, 1); renderPanel(); },
     rename: function (id) {
       var l = getLesson(data, id);
       var unitOpts = [];
@@ -870,10 +990,10 @@ function renderLessonsPanel(p) {
           var oldUnitId = l.unitId;
           if (targetUnit && targetUnit.id !== l.unitId) {
             l.unitId = targetUnit.id;
-            normalizeOrders(data.lessons.filter(function (x) { return x.unitId === oldUnitId; }));
+            normalizeOrders(data.lessons.filter(function (x) { return x.unitId === oldUnitId && !isExerciseItem(x); }));
             sel.subject = targetUnit.subjectId; sel.unit = targetUnit.id; sel.lesson = l.id;
           }
-          setItemOrder(data.lessons.filter(function (x) { return x.unitId === l.unitId; }), l.id, v.order);
+          setItemOrder(data.lessons.filter(function (x) { return x.unitId === l.unitId && !isExerciseItem(x); }), l.id, v.order);
           save(); renderPanel(); toast('تم حفظ تعديلات الدرس');
         }
       });
@@ -899,17 +1019,211 @@ function renderLessonsPanel(p) {
   });
 }
 
-/* ---------- لوحة المحتوى (فيديو / ملفات / تمارين) ---------- */
+/* ---------- تبويب التمارين المستقل (إضافة التمارين: فيديو / صور / PDF) ---------- */
+function renderExercisesPanel(p) {
+  if (!sel.subject) { var s0 = data.subjects.slice().sort(byOrder)[0]; if (s0) sel.subject = s0.id; }
+  if (!sel.subject || !getUnit(data, sel.unit)) { sel.unit = (unitsOf(data, sel.subject)[0] || {}).id || ''; }
+
+  var exList = sel.unit ? unitExercisesOf(data, sel.unit) : [];
+  if (!sel.exercise || !getLesson(data, sel.exercise) || !isExerciseItem(getLesson(data, sel.exercise)) || getLesson(data, sel.exercise).unitId !== sel.unit) {
+    sel.exercise = (exList[0] || {}).id || '';
+  }
+  var activeExercise = sel.exercise ? getLesson(data, sel.exercise) : null;
+
+  p.innerHTML =
+    '<h2>' + svgIcon('pencil') + ' قسم التمارين (فيديو / صور / PDF)</h2>' +
+    '<p class="hint">تظهر هذه التمارين للطلاب عند الدخول إلى الوحدة واختيار قسم «التمارين». اختر المادة والوحدة، أنشئ التمرين (مثل: التمرين 1 أو سلسلة 1)، ثم أضف له الفيديو أو الصور أو ملفات الـ PDF بالأسفل.</p>' +
+
+    /* 1) اختيار المادة والوحدة + إنشاء تمرين جديد */
+    '<div class="frm-card">' +
+      '<div class="frm-row">' +
+        '<select class="inp" id="exSubjSel">' + subjectOptions(sel.subject) + '</select>' +
+        '<select class="inp" id="exUnitSel">' + unitOptions(sel.subject, sel.unit) + '</select>' +
+        (sel.unit
+          ? '<a class="btn" href="unit.html?unit=' + encodeURIComponent(sel.unit) + '&section=exercises" target="_blank">' + svgIcon('eye') + ' معاينة تمارين الوحدة</a>'
+          : '') +
+      '</div>' +
+      '<div class="frm-row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">' +
+        '<input class="inp" id="exNewTitle" placeholder="عنوان التمرين الجديد (مثال: التمرين الأول / سلسلة تمارين 1 / بكالوريا 2025)">' +
+        '<button class="btn btn-primary" id="exAddBtn">' + svgIcon('plus') + ' إضافة تمرين جديد</button>' +
+      '</div>' +
+    '</div>' +
+
+    /* 2) قائمة التمارين في هذه الوحدة */
+    '<h3 class="sub-title">' + svgIcon('pencil') + ' قائمة تمارين الوحدة <span class="cnt">' + exList.length + '</span></h3>' +
+    '<div class="admin-list" id="unitExList">' +
+      (exList.length ? exList.map(function (ex, i) {
+        var vids = resourcesOf(data, ex.id, 'video').length;
+        var pdfs = resourcesOf(data, ex.id, 'pdf').length;
+        var imgs = resourcesOf(data, ex.id, 'image').length;
+        var isSel = activeExercise && activeExercise.id === ex.id;
+        return '<div class="item-row ex-admin-row' + (isSel ? ' active-ex-row' : '') + '" data-select-ex="' + ex.id + '">' +
+          '<div class="item-ico">' + (i + 1) + '</div>' +
+          '<div class="item-info">' +
+            '<div class="item-title">' + escapeHtml(ex.title) +
+              (isSel ? ' <span class="ex-active-pill">التمرين المحدّد للإضافة</span>' : '') +
+            '</div>' +
+            '<div class="item-sub" dir="rtl" style="text-align:right">' +
+              vids + ' فيديو · ' + pdfs + ' PDF · ' + imgs + ' صورة' +
+            '</div>' +
+          '</div>' +
+          actsHTML(ex.id,
+            '<button class="btn-mini-copy' + (isSel ? ' on' : '') + '" data-act="select" data-id="' + ex.id + '" title="اختيار هذا التمرين لإضافة الفيديو أو الصور أو الـ PDF">' +
+              svgIcon('plus') + '<span>' + (isSel ? 'محدّد حالياً' : 'إضافة ملفات') + '</span>' +
+            '</button>' +
+            '<button class="icon-btn" data-act="view" data-id="' + ex.id + '" title="معاينة صفحة التمرين">' + svgIcon('eye') + '</button>' +
+            '<button class="icon-btn" data-act="copy" data-id="' + ex.id + '" title="إنشاء نسخة من التمرين">' + svgIcon('copy') + '</button>'
+          ) +
+        '</div>';
+      }).join('') : '<div class="empty">لا توجد تمارين في هذه الوحدة بعد — اكتب عنوان التمرين أعلاه واضغط «إضافة تمرين جديد»</div>') +
+    '</div>' +
+
+    /* 3) مساحة رفع وإضافة الفيديو والصور والـ PDF للتمرين المحدد */
+    '<div id="exResWrap"></div>';
+
+  $('#exSubjSel').addEventListener('change', function () {
+    sel.subject = this.value;
+    sel.unit = (unitsOf(data, sel.subject)[0] || {}).id || '';
+    sel.exercise = (unitExercisesOf(data, sel.unit)[0] || {}).id || '';
+    renderPanel();
+  });
+  $('#exUnitSel').addEventListener('change', function () {
+    sel.unit = this.value;
+    sel.exercise = (unitExercisesOf(data, sel.unit)[0] || {}).id || '';
+    renderPanel();
+  });
+
+  function createUnitExercise() {
+    if (!sel.unit) { toast('اختر الوحدة أولاً', 'err'); return; }
+    var t = $('#exNewTitle').value.trim();
+    if (!t) { toast('اكتب عنوان التمرين', 'err'); return; }
+    var newId = uid('ex');
+    var nextOrd = unitExercisesOf(data, sel.unit).reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0) + 1;
+    data.lessons.push({
+      id: newId, unitId: sel.unit, title: t, itemType: 'exercise', order: nextOrd
+    });
+    sel.exercise = newId;
+    save();
+    renderPanel();
+    toast('تم إنشاء التمرين — يمكنك الآن إضافة الفيديو أو الصور أو الـ PDF له بالأسفل');
+  }
+
+  $('#exAddBtn').addEventListener('click', createUnitExercise);
+  $('#exNewTitle').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') { e.preventDefault(); createUnitExercise(); }
+  });
+
+  /* النقر على السطر يختار التمرين مباشرة لسهولة الإضافة */
+  $('#unitExList').addEventListener('click', function (e) {
+    if (e.target.closest('[data-act]')) return;
+    var row = e.target.closest('[data-select-ex]');
+    if (row && row.dataset.selectEx !== sel.exercise) {
+      sel.exercise = row.dataset.selectEx;
+      renderPanel();
+    }
+  });
+
+  bindList($('#unitExList'), {
+    select: function (id) {
+      sel.exercise = id;
+      renderPanel();
+      var w = $('#exResWrap');
+      if (w) setTimeout(function () { w.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 60);
+    },
+    up: function (id) {
+      moveItem(data.lessons.filter(function (x) { return x.unitId === sel.unit && isExerciseItem(x); }), id, -1);
+      renderPanel();
+    },
+    down: function (id) {
+      moveItem(data.lessons.filter(function (x) { return x.unitId === sel.unit && isExerciseItem(x); }), id, 1);
+      renderPanel();
+    },
+    rename: function (id) {
+      var ex = getLesson(data, id);
+      var unitOpts = [];
+      data.subjects.slice().sort(byOrder).forEach(function (s) {
+        unitsOf(data, s.id).forEach(function (u) {
+          unitOpts.push({ value: u.id, label: s.name + ' — ' + u.title });
+        });
+      });
+      openEditDialog({
+        title: 'تعديل التمرين', icon: 'pencil',
+        fields: [
+          { key: 'title', label: 'عنوان التمرين', value: ex.title },
+          { key: 'unit', label: 'الوحدة (لنقل التمرين إليها)', type: 'select', value: ex.unitId, options: unitOpts },
+          { key: 'order', label: 'موضع التمرين في الترتيب', type: 'number', value: ex.order || 1 }
+        ],
+        onSave: function (v) {
+          ex.title = v.title.trim() || ex.title;
+          var targetUnit = getUnit(data, v.unit);
+          var oldUnitId = ex.unitId;
+          if (targetUnit && targetUnit.id !== ex.unitId) {
+            ex.unitId = targetUnit.id;
+            normalizeOrders(data.lessons.filter(function (x) { return x.unitId === oldUnitId && isExerciseItem(x); }));
+            sel.subject = targetUnit.subjectId; sel.unit = targetUnit.id; sel.exercise = ex.id;
+          }
+          setItemOrder(data.lessons.filter(function (x) { return x.unitId === ex.unitId && isExerciseItem(x); }), ex.id, v.order);
+          save(); renderPanel(); toast('تم حفظ تعديلات التمرين');
+        }
+      });
+    },
+    copy: function (id) {
+      var newExId = duplicateLesson(id);
+      if (newExId) sel.exercise = newExId;
+      renderPanel(); toast('تم إنشاء نسخة من التمرين مع جميع ملفاته', 'info');
+    },
+    view: function (id) { window.open('lesson.html?lesson=' + encodeURIComponent(id), '_blank'); },
+    del: function (id) {
+      var ex = getLesson(data, id);
+      if (ex && confirm('حذف التمرين "' + ex.title + '" مع كل فيديوهاته وصوره وملفاته؟')) {
+        deleteCascade('lesson', id);
+        if (sel.exercise === id) sel.exercise = '';
+        renderPanel(); toast('تم الحذف', 'info');
+      }
+    }
+  });
+
+  if (!activeExercise) return;
+
+  var wrap = $('#exResWrap');
+  wrap.innerHTML =
+    '<div class="ex-editor-banner">' +
+      '<div class="ex-editor-title">' +
+        svgIcon('sparkles') +
+        '<div><strong>إضافة المحتوى للتمرين: ' + escapeHtml(activeExercise.title) + '</strong>' +
+        '<small>أضف فيديو الحل أو الموضوع، ملفات PDF، أو صور التمرين والحل</small></div>' +
+      '</div>' +
+      '<div class="ex-editor-acts">' +
+        (exList.length > 1 ? '<select class="inp" id="exQuickSwitch" style="width:auto;min-width:190px">' + unitExerciseOptions(sel.unit, activeExercise.id) + '</select>' : '') +
+        '<a class="btn btn-sm" href="lesson.html?lesson=' + encodeURIComponent(activeExercise.id) + '" target="_blank">' + svgIcon('eye') + ' فتح صفحة التمرين</a>' +
+      '</div>' +
+    '</div>' +
+    '<div id="exResInner"></div>';
+
+  var quickSw = $('#exQuickSwitch', wrap);
+  if (quickSw) {
+    quickSw.addEventListener('change', function () {
+      sel.exercise = this.value;
+      renderPanel();
+    });
+  }
+
+  renderResourceSections($('#exResInner', wrap), activeExercise, { exerciseItemMode: true });
+}
+
+/* ---------- لوحة محتوى الدرس والتمارين ---------- */
 function renderContentPanel(p) {
   if (!sel.subject) { var s0 = data.subjects.slice().sort(byOrder)[0]; if (s0) sel.subject = s0.id; }
   if (!sel.subject || !getUnit(data, sel.unit)) sel.unit = (unitsOf(data, sel.subject)[0] || {}).id || '';
-  if (!sel.unit || !getLesson(data, sel.lesson)) sel.lesson = (lessonsOf(data, sel.unit)[0] || {}).id || '';
+  if (!sel.unit || !getLesson(data, sel.lesson) || isExerciseItem(getLesson(data, sel.lesson))) {
+    sel.lesson = (lessonsOf(data, sel.unit)[0] || {}).id || '';
+  }
 
   var lesson = getLesson(data, sel.lesson);
 
   p.innerHTML =
-    '<h2>' + svgIcon('plus') + ' إضافة المحتوى</h2>' +
-    '<p class="hint">اختر المادة ← الوحدة ← الدرس، ثم أضف الفيديوهات والملفات والتمارين.</p>' +
+    '<h2>' + svgIcon('plus') + ' محتوى الدرس والتمارين</h2>' +
+    '<p class="hint">اختر المادة ← الوحدة ← الدرس، ثم أضف الفيديوهات والملخصات والصور والتمارين. يمكنك نسخ أي ملخص أو تمرين إلى <b>جميع الدروس داخل الوحدة</b> مباشرة عند الإضافة أو بنقرة واحدة من القائمة.</p>' +
 
     '<div class="frm-card">' +
       '<div class="frm-row">' +
@@ -935,38 +1249,54 @@ function renderContentPanel(p) {
   $('#cLesson').addEventListener('change', function () { sel.lesson = this.value; renderPanel(); });
 
   if (!lesson) {
-    $('#resArea').innerHTML = '<div class="empty">لا توجد دروس — أنشئ درساً أولاً من تبويب «الدروس»</div>';
+    $('#resArea').innerHTML = '<div class="empty">لا توجد دروس في هذه الوحدة — أنشئ درساً أولاً من تبويب «الدروس» (أو أضف تمارين مستقلة من تبويب «التمارين»)</div>';
     return;
   }
 
-  renderResourceSections($('#resArea'), lesson);
+  renderResourceSections($('#resArea'), lesson, { exerciseItemMode: false });
 }
 
-function renderResourceSections(area, lesson) {
+function renderResourceSections(area, lesson, opts) {
+  opts = opts || {};
+  var exMode = !!opts.exerciseItemMode;
   pickedFiles = {}; /* تصفير الملفات المختارة عند كل إعادة رسم */
-  area.innerHTML =
-    resSectionHTML(lesson, 'video', 'الفيديوهات', 'video/*', 'رابط الفيديو (MP4/WebM/OGG أو رابط يوتيوب)') +
-    resSectionHTML(lesson, 'pdf', 'ملفات PDF', 'application/pdf,.pdf', 'رابط ملف PDF (https://...)') +
-    resSectionHTML(lesson, 'image', 'الصور', 'image/*', 'رابط الصورة (https://...)') +
-    exSectionHTML(lesson);
+
+  if (exMode) {
+    /* وضع التمرين المستقل: فيديو + PDF + صور */
+    area.innerHTML =
+      resSectionHTML(lesson, 'video', 'فيديوهات التمرين والحل', 'video/*', 'رابط الفيديو (MP4/WebM/OGG أو رابط يوتيوب)', exMode) +
+      resSectionHTML(lesson, 'pdf', 'ملفات التمرين والحل PDF', 'application/pdf,.pdf', 'رابط ملف PDF (https://...)', exMode) +
+      resSectionHTML(lesson, 'image', 'صور التمرين والحل', 'image/*', 'رابط الصورة (https://...)', exMode);
+  } else {
+    area.innerHTML =
+      resSectionHTML(lesson, 'video', 'الفيديوهات', 'video/*', 'رابط الفيديو (MP4/WebM/OGG أو رابط يوتيوب)', false) +
+      resSectionHTML(lesson, 'pdf', 'ملفات وملخصات PDF', 'application/pdf,.pdf', 'رابط ملف PDF (https://...)', false) +
+      resSectionHTML(lesson, 'image', 'الصور التوضيحية', 'image/*', 'رابط الصورة (https://...)', false) +
+      exSectionHTML(lesson);
+  }
 
   bindFilePickers(area);
 
   /* ربط أزرار الإضافة */
   ['video', 'pdf', 'image'].forEach(function (kind) {
-    $('#add-' + kind, area).addEventListener('click', function () {
-      addResource(area, lesson, kind, null);
+    var addBtn = $('#add-' + kind, area);
+    if (addBtn) addBtn.addEventListener('click', function () {
+      addResource(area, lesson, kind, null, opts);
     });
   });
-  $('#add-exercise', area).addEventListener('click', function () {
-    addResource(area, lesson, 'exercise', $('#ex-type', area).value);
-  });
+  var addExBtn = $('#add-exercise', area);
+  if (addExBtn) {
+    addExBtn.addEventListener('click', function () {
+      addResource(area, lesson, 'exercise', $('#ex-type', area).value, opts);
+    });
+  }
 
   /* ربط القوائم */
-  ['video', 'pdf', 'image', 'exercise'].forEach(function (kind) {
+  var kindsList = exMode ? ['video', 'pdf', 'image'] : ['video', 'pdf', 'image', 'exercise'];
+  kindsList.forEach(function (kind) {
     bindList($('#list-' + kind, area), {
-      up: function (id) { moveItem(resourcesOf(data, lesson.id, kind), id, -1); renderResourceSections(area, lesson); },
-      down: function (id) { moveItem(resourcesOf(data, lesson.id, kind), id, 1); renderResourceSections(area, lesson); },
+      up: function (id) { moveItem(resourcesOf(data, lesson.id, kind), id, -1); renderResourceSections(area, lesson, opts); },
+      down: function (id) { moveItem(resourcesOf(data, lesson.id, kind), id, 1); renderResourceSections(area, lesson, opts); },
       rename: function (id) {
         var r = data.resources.find(function (x) { return x.id === id; });
         var fields = [
@@ -979,6 +1309,7 @@ function renderResourceSections(area, lesson) {
             options: [
               { value: 'pdf', label: 'ملف PDF' },
               { value: 'video', label: 'فيديو (يُشغَّل في المشغل)' },
+              { value: 'image', label: 'صورة (تُعرض في مكبّر الصور)' },
               { value: 'link', label: 'رابط موقع' }
             ] });
         }
@@ -990,22 +1321,47 @@ function renderResourceSections(area, lesson) {
             if (v.url.trim()) r.url = v.url.trim();
             if (r.kind === 'exercise') r.exerciseType = v.type;
             setItemOrder(resourcesOf(data, lesson.id, r.kind), r.id, v.order);
-            save(); renderResourceSections(area, lesson); toast('تم حفظ التعديلات');
+            save(); renderResourceSections(area, lesson, opts); toast('تم حفظ التعديلات');
           }
         });
       },
-      copy: function (id) { openCopyResourceDialog(id, area, lesson); },
+      copyAllUnit: function (id) { copyResourceToAllUnitLessonsAction(id, lesson); },
+      copy: function (id) { openCopyResourceDialog(id, area, lesson, opts); },
       view: function (id) { previewResource(id); },
       del: function (id) {
         var r = data.resources.find(function (x) { return x.id === id; });
         if (r && confirm('حذف "' + (r.title || KIND_META[r.kind].label) + '"؟')) {
           deleteCascade('resource', id);
-          renderResourceSections(area, lesson);
+          renderResourceSections(area, lesson, opts);
           toast('تم الحذف', 'info');
         }
       }
     });
   });
+}
+
+/* نسخ فوري لأي ملخص أو تمرين أو مورد إلى جميع دروس نفس الوحدة بنقرة واحدة */
+function copyResourceToAllUnitLessonsAction(resourceId, currentItem) {
+  var resource = data.resources.find(function (x) { return x.id === resourceId; });
+  if (!resource || !currentItem) return;
+  var unit = getUnit(data, currentItem.unitId);
+  var targetLessons = lessonsOf(data, currentItem.unitId).filter(function (l) { return l.id !== currentItem.id; });
+  if (!targetLessons.length) {
+    toast('لا توجد دروس أخرى داخل هذه الوحدة لنسخ العنصر إليها', 'info');
+    return;
+  }
+  var label = resource.title || KIND_META[resource.kind].label;
+  var unitTitle = unit ? unit.title : 'هذه الوحدة';
+  if (!confirm('نسخ "' + label + '" إلى جميع الدروس داخل وحدة "' + unitTitle + '" (' + targetLessons.length + ' درس)؟')) {
+    return;
+  }
+  var res = copySingleResourceToTargets(resource, targetLessons);
+  if (res.added > 0) {
+    save();
+    toast('تم نسخ "' + label + '" إلى ' + res.added + ' درس داخل الوحدة' + (res.skipped ? ' (وموجود مسبقاً في ' + res.skipped + ')' : ''));
+  } else {
+    toast('هذا العنصر موجود مسبقاً في جميع دروس الوحدة', 'info');
+  }
 }
 
 /* معاينة المورد من لوحة الإدارة من دون إظهار رابطه في الواجهة العامة. */
@@ -1019,22 +1375,58 @@ function previewResource(id) {
   });
 }
 
-/* نسخ فيديو أو ملف أو تمرين إلى درس آخر مع الاحتفاظ بعنوانه ونوعه وترتيبه. */
-function openCopyResourceDialog(id, area, currentLesson) {
+/* نافذة نسخ موسّعة: تدعم النسخ إلى (جميع دروس الوحدة) أو (جميع تمارين الوحدة) أو (درس/تمرين محدد). */
+function openCopyResourceDialog(id, area, currentLesson, opts) {
   var resource = data.resources.find(function (x) { return x.id === id; });
   if (!resource) return;
-  var options = data.lessons.slice().sort(byOrder).map(function (lesson) {
-    var path = lessonPath(data, lesson.id);
-    var label = (path.subject ? path.subject.name : 'مادة') + ' — ' +
-      (path.unit ? path.unit.title : 'وحدة') + ' — ' + lesson.title;
-    return { value: lesson.id, label: label };
+  var unit = getUnit(data, currentLesson.unitId);
+  var unitName = unit ? unit.title : 'الوحدة الحالية';
+  var unitLessons = lessonsOf(data, currentLesson.unitId).filter(function (l) { return l.id !== currentLesson.id; });
+  var unitExercises = unitExercisesOf(data, currentLesson.unitId).filter(function (ex) { return ex.id !== currentLesson.id; });
+
+  var options = [];
+  if (unitLessons.length) {
+    options.push({
+      value: '__ALL_UNIT_LESSONS__',
+      label: '⚡ جميع الدروس داخل وحدة «' + unitName + '» (' + unitLessons.length + ' درس)'
+    });
+  }
+  if (unitExercises.length) {
+    options.push({
+      value: '__ALL_UNIT_EXERCISES__',
+      label: '⚡ جميع التمارين داخل وحدة «' + unitName + '» (' + unitExercises.length + ' تمرين)'
+    });
+  }
+
+  data.subjects.slice().sort(byOrder).forEach(function (s) {
+    unitsOf(data, s.id).forEach(function (u) {
+      lessonsOf(data, u.id).forEach(function (l) {
+        options.push({ value: l.id, label: 'درس: ' + s.name + ' — ' + u.title + ' — ' + l.title });
+      });
+      unitExercisesOf(data, u.id).forEach(function (ex) {
+        options.push({ value: ex.id, label: 'تمرين: ' + s.name + ' — ' + u.title + ' — ' + ex.title });
+      });
+    });
   });
+
   openEditDialog({
     title: 'نسخ ' + (resource.title || KIND_META[resource.kind].label), icon: 'copy',
-    fields: [{ key: 'lesson', label: 'الدرس المستهدف', type: 'select', value: currentLesson.id, options: options }],
+    fields: [{ key: 'target', label: 'اختر وجهة النسخ', type: 'select', value: options[0] ? options[0].value : currentLesson.id, options: options }],
     onSave: function (v) {
-      var target = getLesson(data, v.lesson);
-      if (!target) { toast('اختر درساً صالحاً', 'err'); return; }
+      if (v.target === '__ALL_UNIT_LESSONS__') {
+        var r1 = copySingleResourceToTargets(resource, unitLessons);
+        if (r1.added) save();
+        toast(r1.added ? 'تم النسخ إلى ' + r1.added + ' درس في الوحدة' : 'العنصر موجود مسبقاً في جميع دروس الوحدة', r1.added ? 'ok' : 'info');
+        return;
+      }
+      if (v.target === '__ALL_UNIT_EXERCISES__') {
+        var r2 = copySingleResourceToTargets(resource, unitExercises);
+        if (r2.added) save();
+        toast(r2.added ? 'تم النسخ إلى ' + r2.added + ' تمرين في الوحدة' : 'العنصر موجود مسبقاً في جميع تمارين الوحدة', r2.added ? 'ok' : 'info');
+        return;
+      }
+      var target = getLesson(data, v.target);
+      if (!target) { toast('اختر وجهة صالحة', 'err'); return; }
       var maxOrder = resourcesOf(data, target.id, resource.kind).reduce(function (m, r) { return Math.max(m, r.order || 0); }, 0);
       data.resources.push({
         id: uid('r'), lessonId: target.id, kind: resource.kind, title: resource.title || '',
@@ -1042,13 +1434,41 @@ function openCopyResourceDialog(id, area, currentLesson) {
         order: maxOrder + 1
       });
       save();
-      if (target.id === currentLesson.id) renderResourceSections(area, currentLesson);
-      toast('تم نسخ المحتوى إلى الدرس المختار');
+      if (target.id === currentLesson.id) renderResourceSections(area, currentLesson, opts);
+      toast('تم نسخ المحتوى بنجاح');
     }
   });
 }
 
-function resSectionHTML(lesson, kind, title, accept, urlPlaceholder) {
+function copyAllCheckboxHTML(lesson, kind, exMode) {
+  var unitLessons = lessonsOf(data, lesson.unitId).filter(function (l) { return l.id !== lesson.id; });
+  var unitExercises = unitExercisesOf(data, lesson.unitId).filter(function (x) { return x.id !== lesson.id; });
+  var itemWord = kind === 'pdf' ? (exMode ? 'الملف' : 'الملخص / الملف')
+    : (kind === 'exercise' ? 'التمرين' : (kind === 'image' ? 'الصورة' : 'الفيديو'));
+
+  if (exMode) {
+    var html = '<div class="copy-unit-bar">';
+    html += '<label class="copy-unit-check"><input type="checkbox" data-copy-all-ex="' + kind + '">' +
+      '<span>نسخ ' + itemWord + ' عند الإضافة إلى <b>جميع تمارين هذه الوحدة</b>' +
+      (unitExercises.length ? ' (' + unitExercises.length + ' تمرين آخر)' : '') + '</span></label>';
+    if (unitLessons.length) {
+      html += '<label class="copy-unit-check"><input type="checkbox" data-copy-all="' + kind + '">' +
+        '<span>نسخ أيضاً إلى <b>جميع دروس الوحدة</b> (' + unitLessons.length + ' درس)</span></label>';
+    }
+    html += '</div>';
+    return html;
+  }
+
+  return '<div class="copy-unit-bar">' +
+    '<label class="copy-unit-check">' +
+      '<input type="checkbox" data-copy-all="' + kind + '">' +
+      '<span>نسخ ' + itemWord + ' تلقائياً عند الإضافة إلى <b>جميع الدروس داخل هذه الوحدة</b>' +
+      (unitLessons.length ? ' (' + unitLessons.length + ' درس آخر)' : ' (عند وجود أكثر من درس في الوحدة)') + '</span>' +
+    '</label>' +
+  '</div>';
+}
+
+function resSectionHTML(lesson, kind, title, accept, urlPlaceholder, exMode) {
   var meta = KIND_META[kind];
   var items = resourcesOf(data, lesson.id, kind);
 
@@ -1056,11 +1476,12 @@ function resSectionHTML(lesson, kind, title, accept, urlPlaceholder) {
       ' <span class="cnt">' + items.length + '</span></h3>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
-        '<input class="inp" data-title="' + kind + '" placeholder="العنوان (مثال: الجزء الأول)">' +
+        '<input class="inp" data-title="' + kind + '" placeholder="العنوان (مثال: ' + (kind === 'pdf' ? 'ملخص شامل للوحدة' : 'الجزء الأول') + ')">' +
         '<input class="inp" data-url="' + kind + '" dir="ltr" placeholder="' + urlPlaceholder + '">' +
         fileLabelHTML(kind, accept) +
         '<button class="btn btn-primary" id="add-' + kind + '">' + svgIcon('plus') + ' إضافة</button>' +
       '</div>' +
+      copyAllCheckboxHTML(lesson, kind, exMode) +
     '</div>' +
     '<div class="admin-list" id="list-' + kind + '">' +
       (items.length ? items.map(function (r) { return resRowHTML(r); }).join('')
@@ -1070,23 +1491,25 @@ function resSectionHTML(lesson, kind, title, accept, urlPlaceholder) {
 
 function exSectionHTML(lesson) {
   var items = resourcesOf(data, lesson.id, 'exercise');
-  return '<h3 class="sub-title">' + svgIcon('pencil') + ' التمارين <span class="cnt">' + items.length + '</span></h3>' +
+  return '<h3 class="sub-title">' + svgIcon('pencil') + ' التمارين المرفقة بالدرس <span class="cnt">' + items.length + '</span></h3>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<input class="inp" data-title="exercise" placeholder="عنوان التمرين (مثال: سلسلة تمارين رقم 1)">' +
         '<select class="inp" id="ex-type">' +
           '<option value="pdf">تمرين PDF</option>' +
           '<option value="video">تمرين فيديو (يُشغَّل في المشغل)</option>' +
+          '<option value="image">تمرين صورة (يُعرض بمكبّر الصور)</option>' +
           '<option value="link">رابط موقع</option>' +
         '</select>' +
         '<input class="inp" data-url="exercise" dir="ltr" placeholder="الرابط (أو ارفع ملفاً)">' +
-        fileLabelHTML('exercise', 'video/*,application/pdf,.pdf') +
+        fileLabelHTML('exercise', 'video/*,image/*,application/pdf,.pdf') +
         '<button class="btn btn-primary" id="add-exercise">' + svgIcon('plus') + ' إضافة</button>' +
       '</div>' +
+      copyAllCheckboxHTML(lesson, 'exercise', false) +
     '</div>' +
     '<div class="admin-list" id="list-exercise">' +
       (items.length ? items.map(function (r) { return resRowHTML(r); }).join('')
-        : '<div class="empty">لا توجد تمارين بعد</div>') +
+        : '<div class="empty">لا توجد تمارين مرفقة بهذا الدرس بعد</div>') +
     '</div>';
 }
 
@@ -1099,21 +1522,30 @@ function resRowHTML(r) {
   else { src = svgIcon('link') + ' رابط خارجي'; rtl = true; }
 
   var typeLbl = r.kind === 'exercise' && r.exerciseType
-    ? ' — ' + ({ video: 'فيديو', pdf: 'PDF', link: 'رابط' }[r.exerciseType])
+    ? ' — ' + ({ video: 'فيديو', pdf: 'PDF', image: 'صورة', link: 'رابط' }[r.exerciseType] || r.exerciseType)
     : '';
 
   return '<div class="item-row">' +
     '<div class="item-ico">' + svgIcon(meta.icon) + '</div>' +
     '<div class="item-info"><div class="item-title">' + escapeHtml(r.title || meta.label) + typeLbl + '</div>' +
     '<div class="item-sub"' + (rtl ? ' dir="rtl" style="text-align:right"' : '') + '>' + src + '</div></div>' +
-    actsHTML(r.id, '<button class="icon-btn" data-act="view" data-id="' + r.id + '" title="معاينة">' + svgIcon('eye') + '</button>' +
-                    '<button class="icon-btn" data-act="copy" data-id="' + r.id + '" title="نسخ إلى درس آخر">' + svgIcon('copy') + '</button>') +
+    actsHTML(r.id,
+      '<button class="btn-mini-copy" data-act="copy-all-unit" data-id="' + r.id + '" title="نسخ هذا العنصر إلى جميع الدروس داخل الوحدة">' +
+        svgIcon('copy') + '<span>نسخ لكل دروس الوحدة</span>' +
+      '</button>' +
+      '<button class="icon-btn" data-act="view" data-id="' + r.id + '" title="معاينة">' + svgIcon('eye') + '</button>' +
+      '<button class="icon-btn" data-act="copy" data-id="' + r.id + '" title="نسخ إلى وجهة محددة">' + svgIcon('copy') + '</button>') +
   '</div>';
 }
 
-function addResource(area, lesson, kind, exerciseType) {
+function addResource(area, lesson, kind, exerciseType, opts) {
   var titleInp = $('input[data-title="' + kind + '"]', area);
   var urlInp = $('input[data-url="' + kind + '"]', area);
+  var copyAllLessonsChk = $('input[data-copy-all="' + kind + '"]', area);
+  var copyAllExChk = $('input[data-copy-all-ex="' + kind + '"]', area);
+  var copyToUnitLessons = !!(copyAllLessonsChk && copyAllLessonsChk.checked);
+  var copyToUnitExs = !!(copyAllExChk && copyAllExChk.checked);
+
   var title = titleInp.value.trim();
   var url = urlInp.value.trim();
   var file = pickedFiles[kind] || null;
@@ -1122,35 +1554,52 @@ function addResource(area, lesson, kind, exerciseType) {
 
   var maxOrder = resourcesOf(data, lesson.id, kind).reduce(function (m, r) { return Math.max(m, r.order || 0); }, 0);
 
+  function finalizeAdd(finalUrl, finalTitle, finalSize) {
+    var created = {
+      id: uid('r'), lessonId: lesson.id, kind: kind,
+      title: finalTitle,
+      url: finalUrl,
+      size: finalSize || undefined,
+      exerciseType: exerciseType || undefined,
+      order: maxOrder + 1
+    };
+    data.resources.push(created);
+
+    var copiedLessons = 0, copiedExs = 0;
+    if (copyToUnitLessons) {
+      var otherLessons = lessonsOf(data, lesson.unitId).filter(function (l) { return l.id !== lesson.id; });
+      copiedLessons = copySingleResourceToTargets(created, otherLessons).added;
+    }
+    if (copyToUnitExs) {
+      var otherExs = unitExercisesOf(data, lesson.unitId).filter(function (x) { return x.id !== lesson.id; });
+      copiedExs = copySingleResourceToTargets(created, otherExs).added;
+    }
+
+    save();
+    titleInp.value = ''; urlInp.value = '';
+    clearPick(kind);
+    renderResourceSections(area, lesson, opts);
+
+    if (copiedLessons > 0 || copiedExs > 0) {
+      var parts = [];
+      if (copiedLessons > 0) parts.push(copiedLessons + ' درس');
+      if (copiedExs > 0) parts.push(copiedExs + ' تمرين');
+      toast('تمت الإضافة ونسخها تلقائياً إلى ' + parts.join(' و ') + ' داخل الوحدة');
+    } else if (copyToUnitLessons || copyToUnitExs) {
+      toast('تمت الإضافة (لا توجد عناصر أخرى في الوحدة لنسخها إليها حالياً)', 'info');
+    } else {
+      toast(file ? 'تم رفع الملف وإضافته' : 'تمت الإضافة');
+    }
+  }
+
   if (file) {
     filePut(file).then(function (fid) {
-      data.resources.push({
-        id: uid('r'), lessonId: lesson.id, kind: kind,
-        title: title || file.name.replace(/\.[^.]+$/, ''),
-        url: fid, size: file.size,
-        exerciseType: exerciseType || undefined,
-        order: maxOrder + 1
-      });
-      save();
-      titleInp.value = ''; urlInp.value = '';
-      clearPick(kind);
-      renderResourceSections(area, lesson);
-      toast('تم رفع الملف وإضافته');
+      finalizeAdd(fid, title || file.name.replace(/\.[^.]+$/, ''), file.size);
     }).catch(function () {
       toast('تعذّر رفع الملف (مساحة غير كافية؟)', 'err');
     });
   } else {
-    data.resources.push({
-      id: uid('r'), lessonId: lesson.id, kind: kind,
-      title: title || guessFileName(url),
-      url: url,
-      exerciseType: exerciseType || undefined,
-      order: maxOrder + 1
-    });
-    save();
-    titleInp.value = ''; urlInp.value = '';
-    renderResourceSections(area, lesson);
-    toast('تمت الإضافة');
+    finalizeAdd(url, title || guessFileName(url), null);
   }
 }
 
@@ -1200,7 +1649,9 @@ function renderBackupPanel(p) {
       '<h3 class="sub-title" style="margin-top:0">' + svgIcon('chart') + ' إحصائيات الموقع</h3>' +
       '<div class="item-sub" style="direction:rtl">' +
         svgIcon('book') + ' ' + data.subjects.length + ' مادة · ' + svgIcon('layers') + ' ' + data.units.length + ' وحدة · ' +
-        svgIcon('film') + ' ' + data.lessons.length + ' درس · ' + svgIcon('plus') + ' ' + data.resources.length + ' عنصر محتوى' +
+        svgIcon('film') + ' ' + data.lessons.filter(function (l) { return !isExerciseItem(l); }).length + ' درس · ' +
+        svgIcon('pencil') + ' ' + data.lessons.filter(function (l) { return isExerciseItem(l); }).length + ' تمرين وحدة · ' +
+        svgIcon('plus') + ' ' + data.resources.length + ' عنصر محتوى' +
       '</div>' +
     '</div>';
 
@@ -1215,7 +1666,7 @@ function renderBackupPanel(p) {
     Cloud.loadAll().then(function (d) {
       data = d;
       window.CLOUD_DATA = d;
-      sel = { subject: '', unit: '', lesson: '' };
+      sel = { subject: '', unit: '', lesson: '', exercise: '' };
       renderPanel();
       toast('تم تحميل أحدث نسخة من السحابة');
     }).catch(function () {
@@ -1247,7 +1698,7 @@ function renderBackupPanel(p) {
         data = d;
         save();
         toast('تم الاستيراد بنجاح');
-        sel = { subject: '', unit: '', lesson: '' };
+        sel = { subject: '', unit: '', lesson: '', exercise: '' };
         renderPanel();
       } catch (e) {
         toast('الملف غير صالح', 'err');
@@ -1262,7 +1713,7 @@ function renderBackupPanel(p) {
       data = resetData();
       window.CLOUD_DATA = data;
       save(); /* في الوضع السحابي: يُعاد ضبط السحابة أيضاً */
-      sel = { subject: '', unit: '', lesson: '' };
+      sel = { subject: '', unit: '', lesson: '', exercise: '' };
       renderPanel();
       updateCloudBadge();
       toast('تمت إعادة التعيين', 'info');

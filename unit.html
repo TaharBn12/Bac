@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>آية باك 2027 — الدروس</title>
+  <title>آية باك 2027 — الوحدة التعليمية</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23f5c542'/%3E%3Cpath d='M50 24 12 42l38 18 38-18z' fill='%231a1440'/%3E%3Cpath d='M26 52v16c0 7 10.7 12 24 12s24-5 24-12V52l-14 6.6V66c0 3-4.5 5.5-10 5.5s-10-2.5-10-5.5v-7.4z' fill='%231a1440'/%3E%3Cpath d='M88 42v18' stroke='%231a1440' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -28,7 +28,7 @@
   <main class="container page">
     <div id="crumbs"></div>
     <div id="head"></div>
-    <div class="list" id="lessonsList"></div>
+    <div id="unitBody"></div>
   </main>
 
   <footer class="footer">آية باك 2027 <i data-icon="dz"></i></footer>
@@ -47,52 +47,137 @@
       requireAuth();
       hydrateIcons();
       initData().then(function () {
-      var data = loadData();
+        var data = loadData();
 
-      var unit = getUnit(data, param('unit'));
-      if (!unit) { location.replace('home.html'); return; }
-      var subject = getSubject(data, unit.subjectId) || { name: 'مادة', color: '' };
+        var unit = getUnit(data, param('unit'));
+        if (!unit) { location.replace('home.html'); return; }
+        var subject = getSubject(data, unit.subjectId) || { id: '', name: 'مادة', color: '', icon: 'book' };
 
-    /* مسار التنقل */
-    $('#crumbs').innerHTML = breadcrumb([
-      { label: 'الرئيسية', href: 'home.html', icon: 'home' },
-      { label: subject.name, href: 'subject.html?subject=' + encodeURIComponent(subject.id) },
-      { label: unit.title }
-    ]);
+        var section = param('section'); /* null | 'lessons' | 'exercises' */
+        if (section !== 'lessons' && section !== 'exercises') section = '';
 
-    /* الترويسة */
-    $('#head').innerHTML =
-      '<div class="page-head ' + (subject.color ? 'c-' + subject.color : '') + '">' +
-        '<div class="icon">' + iconHTML(subject.icon, 'layers') + '</div>' +
-        '<div><h1>' + escapeHtml(unit.title) + '</h1>' +
-        '<div class="meta">' + escapeHtml(subject.name) + ' — اختر الدرس لمشاهدة الفيديو والملفات والتمارين</div></div>' +
-      '</div>';
+        var lessons = lessonsOf(data, unit.id);
+        var exercises = unitExercisesOf(data, unit.id);
+        var unitUrl = 'unit.html?unit=' + encodeURIComponent(unit.id);
+        var lessonsUrl = unitUrl + '&section=lessons';
+        var exercisesUrl = unitUrl + '&section=exercises';
+        var colorClass = subject.color ? 'c-' + subject.color : '';
 
-    /* قائمة الدروس مع عدد محتويات كل درس */
-    var lessons = lessonsOf(data, unit.id);
-    var listEl = $('#lessonsList');
+        /* مسار التنقل */
+        var crumbs = [
+          { label: 'الرئيسية', href: 'home.html', icon: 'home' },
+          { label: subject.name, href: 'subject.html?subject=' + encodeURIComponent(subject.id) }
+        ];
+        if (!section) {
+          crumbs.push({ label: unit.title });
+          document.title = 'آية باك 2027 — ' + unit.title;
+        } else {
+          crumbs.push({ label: unit.title, href: unitUrl });
+          crumbs.push({ label: section === 'exercises' ? 'التمارين' : 'الدروس' });
+          document.title = 'آية باك 2027 — ' + (section === 'exercises' ? 'تمارين ' : 'دروس ') + unit.title;
+        }
+        $('#crumbs').innerHTML = breadcrumb(crumbs);
 
-    if (!lessons.length) {
-      listEl.outerHTML = '<div class="empty">لا توجد دروس في هذه الوحدة بعد</div>';
-    } else {
-      listEl.innerHTML = lessons.map(function (l, i) {
-        var vids = resourcesOf(data, l.id, 'video').length;
-        var files = resourcesOf(data, l.id, 'pdf').length + resourcesOf(data, l.id, 'image').length;
-        var exs = resourcesOf(data, l.id, 'exercise').length;
-        return '<a class="row-card ' + (subject.color ? 'c-' + subject.color : '') + '" href="lesson.html?lesson=' + encodeURIComponent(l.id) + '">' +
-          '<div class="num">' + (i + 1) + '</div>' +
-          '<div class="info"><div class="t">' + escapeHtml(l.title) + '</div>' +
-          '<div class="badges">' +
-            '<span class="badge' + (vids ? ' on' : '') + '">' + svgIcon('film') + ' ' + vids + ' فيديو</span>' +
-            '<span class="badge' + (files ? ' on' : '') + '">' + svgIcon('file') + ' ' + files + ' ملف</span>' +
-            '<span class="badge' + (exs ? ' on' : '') + '">' + svgIcon('pencil') + ' ' + exs + ' تمرين</span>' +
-          '</div></div>' +
-          '<div class="arrow">‹</div>' +
-        '</a>';
-      }).join('');
-    }
+        /* الترويسة */
+        var subtitle = !section
+          ? escapeHtml(subject.name) + ' — اختر القسم: الدروس أو التمارين'
+          : (section === 'exercises'
+              ? escapeHtml(subject.name) + ' — اختر التمرين لعرض الفيديو والصور وملفات PDF'
+              : escapeHtml(subject.name) + ' — اختر الدرس لمشاهدة الفيديو والملفات والتمارين');
 
-      $('#logoutBtn').addEventListener('click', doLogout);
+        $('#head').innerHTML =
+          '<div class="page-head ' + colorClass + '">' +
+            '<div class="icon">' + iconHTML(subject.icon, 'layers') + '</div>' +
+            '<div><h1>' + escapeHtml(unit.title) + '</h1>' +
+            '<div class="meta">' + subtitle + '</div></div>' +
+          '</div>';
+
+        var bodyEl = $('#unitBody');
+
+        /* 1) شاشة الاختيارين عند الدخول للوحدة: دروس | تمارين */
+        if (!section) {
+          bodyEl.innerHTML =
+            '<div class="unit-choices">' +
+              '<a class="unit-choice-card choice-lessons ' + colorClass + '" href="' + lessonsUrl + '">' +
+                '<div class="uc-ico">' + svgIcon('film') + '</div>' +
+                '<div class="uc-body">' +
+                  '<div class="uc-title">الدروس</div>' +
+                  '<p class="uc-desc">شرح الدروس بالفيديو، ملخصات PDF، صور توضيحية وتطبيقات</p>' +
+                  '<div class="uc-foot">' +
+                    '<span class="badge' + (lessons.length ? ' on' : '') + '">' + svgIcon('film') + ' ' + lessons.length + ' دروس</span>' +
+                    '<span class="uc-enter">تصفّح الدروس ‹</span>' +
+                  '</div>' +
+                '</div>' +
+              '</a>' +
+              '<a class="unit-choice-card choice-exercises ' + colorClass + '" href="' + exercisesUrl + '">' +
+                '<div class="uc-ico">' + svgIcon('pencil') + '</div>' +
+                '<div class="uc-body">' +
+                  '<div class="uc-title">التمارين</div>' +
+                  '<p class="uc-desc">تمارين وسلاسل الوحدة المحلولة بالفيديو والصور وملفات PDF</p>' +
+                  '<div class="uc-foot">' +
+                    '<span class="badge' + (exercises.length ? ' on' : '') + '">' + svgIcon('pencil') + ' ' + exercises.length + ' تمارين</span>' +
+                    '<span class="uc-enter">تصفّح التمارين ‹</span>' +
+                  '</div>' +
+                '</div>' +
+              '</a>' +
+            '</div>';
+        } else {
+          /* شريط تبديل سريع بين الدروس والتمارين داخل الوحدة */
+          var switcherHTML =
+            '<div class="unit-switch">' +
+              '<a class="unit-switch-btn' + (section === 'lessons' ? ' active' : '') + '" href="' + lessonsUrl + '">' +
+                svgIcon('film') + ' <span>الدروس</span> <b class="cnt">' + lessons.length + '</b>' +
+              '</a>' +
+              '<a class="unit-switch-btn' + (section === 'exercises' ? ' active' : '') + '" href="' + exercisesUrl + '">' +
+                svgIcon('pencil') + ' <span>التمارين</span> <b class="cnt">' + exercises.length + '</b>' +
+              '</a>' +
+            '</div>';
+
+          if (section === 'lessons') {
+            if (!lessons.length) {
+              bodyEl.innerHTML = switcherHTML + '<div class="empty">لا توجد دروس في هذه الوحدة بعد</div>';
+            } else {
+              bodyEl.innerHTML = switcherHTML + '<div class="list">' + lessons.map(function (l, i) {
+                var vids = resourcesOf(data, l.id, 'video').length;
+                var files = resourcesOf(data, l.id, 'pdf').length + resourcesOf(data, l.id, 'image').length;
+                var exs = resourcesOf(data, l.id, 'exercise').length;
+                return '<a class="row-card ' + colorClass + '" href="lesson.html?lesson=' + encodeURIComponent(l.id) + '">' +
+                  '<div class="num">' + (i + 1) + '</div>' +
+                  '<div class="info"><div class="t">' + escapeHtml(l.title) + '</div>' +
+                  '<div class="badges">' +
+                    '<span class="badge' + (vids ? ' on' : '') + '">' + svgIcon('film') + ' ' + vids + ' فيديو</span>' +
+                    '<span class="badge' + (files ? ' on' : '') + '">' + svgIcon('file') + ' ' + files + ' ملف</span>' +
+                    (exs ? '<span class="badge on">' + svgIcon('pencil') + ' ' + exs + ' تمرين</span>' : '') +
+                  '</div></div>' +
+                  '<div class="arrow">‹</div>' +
+                '</a>';
+              }).join('') + '</div>';
+            }
+          } else {
+            /* قائمة تمارين الوحدة المرقّمة */
+            if (!exercises.length) {
+              bodyEl.innerHTML = switcherHTML + '<div class="empty">لا توجد تمارين مضافة في هذه الوحدة بعد</div>';
+            } else {
+              bodyEl.innerHTML = switcherHTML + '<div class="list">' + exercises.map(function (ex, i) {
+                var vids = resourcesOf(data, ex.id, 'video').length;
+                var pdfs = resourcesOf(data, ex.id, 'pdf').length;
+                var imgs = resourcesOf(data, ex.id, 'image').length;
+                return '<a class="row-card exercise-row-card ' + colorClass + '" href="lesson.html?lesson=' + encodeURIComponent(ex.id) + '">' +
+                  '<div class="num">' + (i + 1) + '</div>' +
+                  '<div class="info"><div class="t">' + escapeHtml(ex.title) + '</div>' +
+                  '<div class="badges">' +
+                    '<span class="badge' + (vids ? ' on' : '') + '">' + svgIcon('film') + ' ' + vids + ' فيديو</span>' +
+                    '<span class="badge' + (pdfs ? ' on' : '') + '">' + svgIcon('file') + ' ' + pdfs + ' PDF</span>' +
+                    '<span class="badge' + (imgs ? ' on' : '') + '">' + svgIcon('image') + ' ' + imgs + ' صورة</span>' +
+                  '</div></div>' +
+                  '<div class="arrow">‹</div>' +
+                '</a>';
+              }).join('') + '</div>';
+            }
+          }
+        }
+
+        $('#logoutBtn').addEventListener('click', doLogout);
       });
     })();
   </script>

@@ -217,10 +217,11 @@ function renderPlaylistImporterView(box) {
         '</label>' +
 
         '<label class="field">' +
-          '<span>' + svgIcon('film') + ' طريقة تنظيم الدروس</span>' +
+          '<span>' + svgIcon('film') + ' طريقة تنظيم المحتوى</span>' +
           '<select class="inp" id="ytGroupMode">' +
-            '<option value="smart"' + (f.groupingMode === 'smart' ? ' selected' : '') + '>تجميع ذكي (يدمج أجزاء الدرس ويفصل التمارين)</option>' +
+            '<option value="smart"' + (f.groupingMode === 'smart' ? ' selected' : '') + '>تجميع ذكي للدروس (يدمج أجزاء الدرس ويفصل التمارين)</option>' +
             '<option value="per_video"' + (f.groupingMode === 'per_video' ? ' selected' : '') + '>كل فيديو في درس مستقل بالترتيب</option>' +
+            '<option value="unit_exercises"' + (f.groupingMode === 'unit_exercises' ? ' selected' : '') + '>✏️ استيراد كل فيديو كتمرين مستقل في قسم «تمارين الوحدة»</option>' +
             '<option value="single_lesson"' + (f.groupingMode === 'single_lesson' ? ' selected' : '') + '>وضع كل الفيديوهات داخل درس واحد</option>' +
           '</select>' +
         '</label>' +
@@ -388,6 +389,7 @@ function buildFinalPlanFromEditable(edPlan) {
         return {
           id: l.id || undefined,
           title: l.title.trim(),
+          item_type: l.item_type === 'exercise' ? 'exercise' : 'lesson',
           videos: videos,
           exercises: exercises
         };
@@ -464,11 +466,15 @@ function renderPlaylistPlanPreview(area) {
         '</div>';
       }).join('');
 
+      var isUnitEx = l.item_type === 'exercise';
       return '<div class="ai-lesson-card' + (l._enabled === false ? ' muted' : '') + '">' +
         '<div class="ai-lesson-head">' +
           '<input type="checkbox" data-act="toggle-lesson" data-u="' + uIdx + '" data-l="' + lIdx + '"' + (l._enabled !== false ? ' checked' : '') + '>' +
           '<span class="ai-num">' + (lIdx + 1) + '</span>' +
-          '<input class="inp" data-act="edit-lesson-title" data-u="' + uIdx + '" data-l="' + lIdx + '" value="' + escapeHtml(l.title) + '" placeholder="عنوان الدرس">' +
+          '<button type="button" class="ai-role-chip ' + (isUnitEx ? 'ex' : 'vid') + '" data-act="flip-lesson-type" data-u="' + uIdx + '" data-l="' + lIdx + '" title="اضغط للتبديل بين قسم الدروس وقسم تمارين الوحدة">' +
+            (isUnitEx ? svgIcon('pencil') + ' تمرين وحدة' : svgIcon('book-open') + ' درس') +
+          '</button>' +
+          '<input class="inp" data-act="edit-lesson-title" data-u="' + uIdx + '" data-l="' + lIdx + '" value="' + escapeHtml(l.title) + '" placeholder="' + (isUnitEx ? 'عنوان التمرين' : 'عنوان الدرس') + '">' +
         '</div>' +
         '<div class="ai-vid-list">' + itemsHTML + '</div>' +
       '</div>';
@@ -590,6 +596,16 @@ function renderPlaylistPlanPreview(area) {
   });
 
   tree.addEventListener('click', function (e) {
+    var lessonTypeBtn = e.target.closest('[data-act="flip-lesson-type"]');
+    if (lessonTypeBtn) {
+      var lu = +lessonTypeBtn.dataset.u, ll = +lessonTypeBtn.dataset.l;
+      var lObj = plan.units[lu] && plan.units[lu].lessons[ll];
+      if (lObj) {
+        lObj.item_type = lObj.item_type === 'exercise' ? 'lesson' : 'exercise';
+        renderPlaylistPlanPreview(area);
+      }
+      return;
+    }
     var btn = e.target.closest('[data-act="flip-role"]');
     if (!btn) return;
     var u = +btn.dataset.u, l = +btn.dataset.l, i = +btn.dataset.i;
@@ -712,11 +728,19 @@ function applyPlanLocally(finalPlan) {
     }
 
     uP.lessons.forEach(function (lP) {
-      var existingL = lessonsOf(data, existingU.id).find(function (l) {
+      var isExItem = lP.item_type === 'exercise';
+      var pool = isExItem ? unitExercisesOf(data, existingU.id) : lessonsOf(data, existingU.id);
+      var existingL = pool.find(function (l) {
         return (lP.id && l.id === lP.id) || normArClient(l.title) === normArClient(lP.title);
       });
       if (!existingL) {
-        existingL = { id: uid('l'), unitId: existingU.id, title: lP.title, order: lessonsOf(data, existingU.id).length + 1 };
+        existingL = {
+          id: uid(isExItem ? 'ex' : 'l'),
+          unitId: existingU.id,
+          title: lP.title,
+          itemType: isExItem ? 'exercise' : 'lesson',
+          order: pool.length + 1
+        };
         data.lessons.push(existingL);
         stats.lessons_created++;
       } else {

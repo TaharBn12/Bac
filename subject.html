@@ -63,7 +63,7 @@
         '<div class="page-head ' + (subject.color ? 'c-' + subject.color : '') + '">' +
           '<div class="icon">' + iconHTML(subject.icon, 'book') + '</div>' +
           '<div><h1>' + escapeHtml(subject.name) + '</h1>' +
-          '<div class="meta">اختر الوحدة التعليمية لعرض دروسها</div></div>' +
+          '<div class="meta">اختر الوحدة التعليمية لعرض الدروس أو التمارين</div></div>' +
         '</div>';
 
       /* قائمة الوحدات */
@@ -75,11 +75,14 @@
       } else {
         listEl.innerHTML = units.map(function (u, i) {
           var ls = lessonsOf(data, u.id);
+          var exs = unitExercisesOf(data, u.id);
           return '<a class="row-card ' + (subject.color ? 'c-' + subject.color : '') + '" href="unit.html?unit=' + encodeURIComponent(u.id) + '">' +
             '<div class="num">' + (i + 1) + '</div>' +
             '<div class="info"><div class="t">' + escapeHtml(u.title) + '</div>' +
-            '<div class="badges"><span class="badge on">' + ls.length + ' دروس</span>' +
-            (ls.length ? '' : '<span class="badge">فارغة</span>') + '</div></div>' +
+            '<div class="badges">' +
+              '<span class="badge' + (ls.length ? ' on' : '') + '">' + svgIcon('film') + ' ' + ls.length + ' دروس</span>' +
+              '<span class="badge' + (exs.length ? ' on' : '') + '">' + svgIcon('pencil') + ' ' + exs.length + ' تمارين</span>' +
+            '</div></div>' +
             '<div class="arrow">‹</div>' +
           '</a>';
         }).join('');

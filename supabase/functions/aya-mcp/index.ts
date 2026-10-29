@@ -40,6 +40,7 @@ interface LessonRow {
   id: string;
   unit_id: string;
   title: string;
+  item_type?: "lesson" | "exercise" | string;
   sort_order: number;
 }
 interface ResourceRow {
@@ -943,11 +944,12 @@ async function extractYouTubePlaylistOrVideo(urlInput: string, maxVideos = 200):
 interface PlanResourceInput {
   title: string;
   url: string;
-  exercise_type?: "video" | "pdf" | "link";
+  exercise_type?: "video" | "pdf" | "image" | "link";
 }
 interface PlanLessonInput {
   id?: string;
   title: string;
+  item_type?: "lesson" | "exercise";
   videos?: PlanResourceInput[];
   exercises?: PlanResourceInput[];
   pdfs?: PlanResourceInput[];
@@ -975,7 +977,7 @@ function buildSmartCurriculumPlan(
   opts: {
     subjectNameOrId?: string;
     unitTitleOrId?: string;
-    groupingMode?: "smart" | "per_video" | "single_lesson";
+    groupingMode?: "smart" | "per_video" | "single_lesson" | "unit_exercises";
     separateExercises?: boolean;
   } = {},
 ): CurriculumPlan {
@@ -1092,6 +1094,17 @@ function buildSmartCurriculumPlan(
       currentUnitTitle = v.unit_hint;
     }
     const unitObj = getOrCreateUnit(currentUnitTitle, fixedUnit?.id);
+
+    // نمط استيراد كل فيديو كتمرين مستقل داخل قسم «تمارين الوحدة»
+    if (grouping === "unit_exercises") {
+      unitObj.lessons.push({
+        title: v.cleaned_title,
+        item_type: "exercise",
+        videos: [{ title: v.cleaned_title, url: v.url }],
+        exercises: [],
+      });
+      continue;
+    }
 
     // إذا كان الفيديو تمريناً ومطلوب فصل التمارين: نربطه بالدرس السابق أو ننشئ درس تمارين
     if (separateExercises && v.is_exercise_hint && grouping === "smart") {
@@ -1219,16 +1232,21 @@ async function executeCurriculumPlan(plan: CurriculumPlan, adminKey: string) {
 
     for (const lPlan of uPlan.lessons || []) {
       if (!lPlan.title && !lPlan.id) continue;
+      const targetType = lPlan.item_type === "exercise" ? "exercise" : "lesson";
+      const isRowEx = (row: LessonRow) => row.item_type === "exercise" || row.id.startsWith("ex-");
+      const sameTypeLessons = existingLessons.filter((l) => (targetType === "exercise" ? isRowEx(l) : !isRowEx(l)));
+
       let lesson =
         (lPlan.id ? existingLessons.find((l) => l.id === lPlan.id) : null) ||
-        existingLessons.find((l) => normArNoAl(l.title) === normArNoAl(lPlan.title));
+        sameTypeLessons.find((l) => normArNoAl(l.title) === normArNoAl(lPlan.title));
 
       if (!lesson) {
         nextLessonOrder += 1;
         lesson = {
-          id: uid("l"),
+          id: uid(targetType === "exercise" ? "ex" : "l"),
           unit_id: unit.id,
           title: lPlan.title.trim(),
+          item_type: targetType,
           sort_order: nextLessonOrder,
         };
         existingLessons.push(lesson);
@@ -1378,8 +1396,9 @@ const MCP_TOOLS = [
                 items: {
                   type: "object",
                   properties: {
-                    id: { type: "string", description: "معرف الدرس إن كان موجوداً مسبقاً (اختياري)." },
-                    title: { type: "string", description: "عنوان الدرس." },
+                    id: { type: "string", description: "معرف الدرس أو التمرين إن كان موجوداً مسبقاً (اختياري)." },
+                    title: { type: "string", description: "عنوان الدرس أو التمرين." },
+                    item_type: { type: "string", enum: ["lesson", "exercise"], description: "lesson = درس في قسم الدروس، exercise = تمرين مستقل في قسم تمارين الوحدة." },
                     videos: {
                       type: "array",
                       description: "فيديوهات شرح الدرس.",
@@ -1448,8 +1467,8 @@ const MCP_TOOLS = [
         unit_title_or_id: { type: "string", description: "عنوان أو معرف الوحدة (اختياري)." },
         grouping_mode: {
           type: "string",
-          enum: ["smart", "per_video", "single_lesson"],
-          description: "طريقة تقسيم الدروس: smart (تجميع أجزاء الدرس وفصل التمارين)، per_video (درس لكل فيديو)، single_lesson (كلها في درس واحد).",
+          enum: ["smart", "per_video", "unit_exercises", "single_lesson"],
+          description: "طريقة تقسيم المحتوى: smart (تجميع أجزاء الدرس وفصل التمارين)، per_video (درس لكل فيديو)، unit_exercises (وضع كل فيديو كتمرين مستقل في قسم تمارين الوحدة)، single_lesson (كلها في درس واحد).",
         },
         separate_exercises: {
           type: "boolean",
@@ -1492,35 +1511,49 @@ const MCP_TOOLS = [
   },
   {
     name: "manage_lesson",
-    description: "إدارة الدروس: إنشاء درس جديد (create)، تعديل عنوانه أو نقله لوحدة أخرى أو ترتيبه (update)، أو حذفه (delete).",
+    description: "إدارة الدروس أو تمارين الوحدة المستقلة: إنشاء درس أو تمرين مستقل داخل الوحدة (create مع تحديد item_type = lesson أو exercise)، تعديل عنوانه أو نقله لوحدة أخرى أو ترتيبه (update)، أو حذفه (delete).",
     inputSchema: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["create", "update", "delete"] },
-        id: { type: "string", description: "معرف الدرس (مطلوب عند update أو delete)." },
+        id: { type: "string", description: "معرف الدرس أو التمرين (مطلوب عند update أو delete)." },
         unit_id: { type: "string", description: "معرف الوحدة التابع لها (مطلوب عند create، واختياري للنقل عند update)." },
-        title: { type: "string", description: "عنوان الدرس." },
-        sort_order: { type: "number", description: "ترتيب الدرس داخل الوحدة." },
+        title: { type: "string", description: "عنوان الدرس أو التمرين." },
+        item_type: { type: "string", enum: ["lesson", "exercise"], description: "lesson = درس في قسم الدروس، exercise = تمرين مستقل في قسم تمارين الوحدة." },
+        sort_order: { type: "number", description: "الترتيب داخل الوحدة." },
       },
       required: ["action"],
     },
   },
   {
     name: "manage_resource",
-    description: "إدارة محتوى الدرس (فيديو، ملخص PDF، صورة، أو تمرين): إضافة (create)، تعديل (update)، أو حذف (delete).",
+    description: "إدارة محتوى الدرس أو التمرين المستقل (فيديو، ملخص PDF، صورة، أو تمرين مرفق): إضافة (create)، تعديل (update)، أو حذف (delete). كما يدعم copy_to_all_unit_lessons لنسخ العنصر إلى جميع دروس الوحدة تلقائياً عند الإضافة.",
     inputSchema: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["create", "update", "delete"] },
         id: { type: "string", description: "معرف المورد (مطلوب عند update أو delete)." },
-        lesson_id: { type: "string", description: "معرف الدرس (مطلوب عند create، واختياري عند update)." },
+        lesson_id: { type: "string", description: "معرف الدرس أو التمرين المستقل (مطلوب عند create، واختياري عند update)." },
         kind: { type: "string", enum: ["video", "pdf", "image", "exercise"], description: "نوع المحتوى." },
         title: { type: "string", description: "عنوان الفيديو أو الملخص أو التمرين." },
         url: { type: "string", description: "رابط يوتيوب أو رابط الملف المباشر." },
-        exercise_type: { type: "string", enum: ["video", "pdf", "link"], description: "نوع التمرين عندما يكون kind = exercise." },
+        exercise_type: { type: "string", enum: ["video", "pdf", "image", "link"], description: "نوع التمرين عندما يكون kind = exercise." },
+        copy_to_all_unit_lessons: { type: "boolean", description: "إذا كان true عند الإضافة (create)، يُنسخ هذا الملخص أو التمرين تلقائياً إلى جميع الدروس داخل نفس الوحدة." },
         sort_order: { type: "number", description: "ترتيب العرض داخل القسم." },
       },
       required: ["action"],
+    },
+  },
+  {
+    name: "copy_resource_to_unit_lessons",
+    description: "نسخ مورد موجود (ملخص PDF، تمرين، صورة، أو فيديو) إلى جميع الدروس داخل نفس الوحدة دفعة واحدة دون تكرار.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        resource_id: { type: "string", description: "معرف المورد المراد نسخه." },
+        unit_id: { type: "string", description: "اختياري: معرف الوحدة المستهدفة (إن تُرك فارغاً تُستخدم وحدة الدرس الحالي للمورد)." },
+      },
+      required: ["resource_id"],
     },
   },
   {
@@ -1544,11 +1577,13 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
       const includeRes = Boolean(args?.include_resources);
       const subjects = filterSubj ? d.subjects.filter((s) => s.id === filterSubj) : d.subjects;
 
+      const isRowEx = (l: LessonRow) => l.item_type === "exercise" || l.id.startsWith("ex-");
       return {
         totals: {
           subjects: d.subjects.length,
           units: d.units.length,
-          lessons: d.lessons.length,
+          lessons: d.lessons.filter((l) => !isRowEx(l)).length,
+          unit_exercises: d.lessons.filter((l) => isRowEx(l)).length,
           resources: d.resources.length,
         },
         subjects: subjects.map((s) => {
@@ -1560,27 +1595,30 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
             color: s.color,
             sort_order: s.sort_order,
             units: sUnits.map((u) => {
-              const uLessons = d.lessons.filter((l) => l.unit_id === u.id);
+              const uItems = d.lessons.filter((l) => l.unit_id === u.id);
+              const mapItem = (l: LessonRow) => {
+                const lRes = d.resources.filter((r) => r.lesson_id === l.id);
+                const base: Record<string, unknown> = {
+                  id: l.id,
+                  title: l.title,
+                  item_type: isRowEx(l) ? "exercise" : "lesson",
+                  sort_order: l.sort_order,
+                  counts: {
+                    videos: lRes.filter((r) => r.kind === "video").length,
+                    pdfs: lRes.filter((r) => r.kind === "pdf").length,
+                    images: lRes.filter((r) => r.kind === "image").length,
+                    exercises: lRes.filter((r) => r.kind === "exercise").length,
+                  },
+                };
+                if (includeRes) base.resources = lRes;
+                return base;
+              };
               return {
                 id: u.id,
                 title: u.title,
                 sort_order: u.sort_order,
-                lessons: uLessons.map((l) => {
-                  const lRes = d.resources.filter((r) => r.lesson_id === l.id);
-                  const base: Record<string, unknown> = {
-                    id: l.id,
-                    title: l.title,
-                    sort_order: l.sort_order,
-                    counts: {
-                      videos: lRes.filter((r) => r.kind === "video").length,
-                      pdfs: lRes.filter((r) => r.kind === "pdf").length,
-                      images: lRes.filter((r) => r.kind === "image").length,
-                      exercises: lRes.filter((r) => r.kind === "exercise").length,
-                    },
-                  };
-                  if (includeRes) base.resources = lRes;
-                  return base;
-                }),
+                lessons: uItems.filter((l) => !isRowEx(l)).map(mapItem),
+                unit_exercises: uItems.filter((l) => isRowEx(l)).map(mapItem),
               };
             }),
           };
@@ -1714,15 +1752,18 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
       if (action === "create") {
         const unitId = String(args?.unit_id || "").trim();
         const title = String(args?.title || "").trim();
-        if (!unitId || !title) throw new Error("كل من unit_id و title مطلوبان لإنشاء درس.");
+        const itemType = args?.item_type === "exercise" ? "exercise" : "lesson";
+        if (!unitId || !title) throw new Error("كل من unit_id و title مطلوبان لإنشاء درس أو تمرين.");
         const d = await dbSelectAll();
+        const isRowEx = (l: LessonRow) => l.item_type === "exercise" || l.id.startsWith("ex-");
         const maxOrder = d.lessons
-          .filter((l) => l.unit_id === unitId)
+          .filter((l) => l.unit_id === unitId && (itemType === "exercise" ? isRowEx(l) : !isRowEx(l)))
           .reduce((m, l) => Math.max(m, l.sort_order || 0), 0);
         const row: LessonRow = {
-          id: uid("l"),
+          id: uid(itemType === "exercise" ? "ex" : "l"),
           unit_id: unitId,
           title,
+          item_type: itemType,
           sort_order: Number(args?.sort_order) || maxOrder + 1,
         };
         const [saved] = await dbUpsert("lessons", [row], adminKey);
@@ -1730,17 +1771,18 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
       }
       if (action === "update") {
         const id = String(args?.id || "").trim();
-        if (!id) throw new Error("معرف الدرس (id) مطلوب للتعديل.");
+        if (!id) throw new Error("معرف الدرس أو التمرين (id) مطلوب للتعديل.");
         const patch: Record<string, unknown> = {};
         if (args?.unit_id !== undefined) patch.unit_id = String(args.unit_id).trim();
         if (args?.title !== undefined) patch.title = String(args.title).trim();
+        if (args?.item_type !== undefined) patch.item_type = args.item_type === "exercise" ? "exercise" : "lesson";
         if (args?.sort_order !== undefined) patch.sort_order = Number(args.sort_order);
         const updated = await dbUpdate<LessonRow>("lessons", id, patch, adminKey);
         return { ok: true, action: "updated", lesson: updated };
       }
       if (action === "delete") {
         const id = String(args?.id || "").trim();
-        if (!id) throw new Error("معرف الدرس (id) مطلوب للحذف.");
+        if (!id) throw new Error("معرف الدرس أو التمرين (id) مطلوب للحذف.");
         await dbDelete("lessons", id, adminKey);
         return { ok: true, action: "deleted", id };
       }
@@ -1768,8 +1810,33 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
           exercise_type: kind === "exercise" ? String(args?.exercise_type || "video") : null,
           sort_order: Number(args?.sort_order) || maxOrder + 1,
         };
-        const [saved] = await dbUpsert("resources", [row], adminKey);
-        return { ok: true, action: "created", resource: saved };
+        const rowsToSave: ResourceRow[] = [row];
+        if (args?.copy_to_all_unit_lessons) {
+          const parentItem = d.lessons.find((l) => l.id === lessonId);
+          if (parentItem) {
+            const isRowEx = (l: LessonRow) => l.item_type === "exercise" || l.id.startsWith("ex-");
+            const siblingLessons = d.lessons.filter(
+              (l) => l.unit_id === parentItem.unit_id && l.id !== lessonId && !isRowEx(l),
+            );
+            for (const sib of siblingLessons) {
+              const sibRes = d.resources.filter((r) => r.lesson_id === sib.id && r.kind === kind);
+              if (sibRes.some((r) => r.url === url)) continue;
+              const sibMax = sibRes.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
+              rowsToSave.push({
+                id: uid("r"),
+                lesson_id: sib.id,
+                kind,
+                title: row.title,
+                url,
+                size: null,
+                exercise_type: row.exercise_type,
+                sort_order: sibMax + 1,
+              });
+            }
+          }
+        }
+        const saved = await dbUpsert("resources", rowsToSave, adminKey);
+        return { ok: true, action: "created", resource: saved[0], copied_to_lessons: Math.max(0, saved.length - 1) };
       }
       if (action === "update") {
         const id = String(args?.id || "").trim();
@@ -1791,6 +1858,43 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
         return { ok: true, action: "deleted", id };
       }
       throw new Error(`إجراء غير معروف في manage_resource: ${action}`);
+    }
+
+    case "copy_resource_to_unit_lessons": {
+      const resourceId = String(args?.resource_id || "").trim();
+      if (!resourceId) throw new Error("معرف المورد (resource_id) مطلوب.");
+      const d = await dbSelectAll();
+      const src = d.resources.find((r) => r.id === resourceId);
+      if (!src) throw new Error(`المورد (${resourceId}) غير موجود.`);
+      const parentLesson = d.lessons.find((l) => l.id === src.lesson_id);
+      const targetUnitId = String(args?.unit_id || parentLesson?.unit_id || "").trim();
+      if (!targetUnitId) throw new Error("تعذّر تحديد الوحدة المستهدفة.");
+      const isRowEx = (l: LessonRow) => l.item_type === "exercise" || l.id.startsWith("ex-");
+      const targetLessons = d.lessons.filter(
+        (l) => l.unit_id === targetUnitId && l.id !== src.lesson_id && !isRowEx(l),
+      );
+      const toInsert: ResourceRow[] = [];
+      let skipped = 0;
+      for (const tl of targetLessons) {
+        const existing = d.resources.filter((r) => r.lesson_id === tl.id && r.kind === src.kind);
+        if (existing.some((r) => r.url === src.url)) {
+          skipped++;
+          continue;
+        }
+        const maxOrd = existing.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
+        toInsert.push({
+          id: uid("r"),
+          lesson_id: tl.id,
+          kind: src.kind,
+          title: src.title,
+          url: src.url,
+          size: src.size,
+          exercise_type: src.exercise_type,
+          sort_order: maxOrd + 1,
+        });
+      }
+      if (toInsert.length) await dbUpsert("resources", toInsert, adminKey);
+      return { ok: true, copied_count: toInsert.length, skipped_existing: skipped };
     }
 
     case "search_site_content": {
@@ -1957,6 +2061,7 @@ async function runClaudeAdminChat(
           "manage_unit",
           "manage_lesson",
           "manage_resource",
+          "copy_resource_to_unit_lessons",
         ].includes(tu.name)
       ) {
         mutated = true;
