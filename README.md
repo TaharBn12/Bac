@@ -97,10 +97,15 @@ python3 -m http.server 8000
 # ثم افتح http://localhost:8000
 ```
 
-**على الإنترنت (مجاناً)**:
-1. ارفع الملفات إلى مستودع GitHub.
-2. من إعدادات المستودع فعّل **GitHub Pages**.
-3. أو اسحب المجلد وأفلته في [Netlify Drop](https://app.netlify.com/drop) — يعمل مباشرة.
+**على استضافة GitHub Pages (مجاناً)**:
+1. افتح إعدادات الاستضافة مباشرة: **[github.com/TaharBn12/Bac/settings/pages](https://github.com/TaharBn12/Bac/settings/pages)**
+2. تحت **Build and deployment → Source** اتركها **Deploy from a branch**.
+3. تحت **Branch** اختر **`main`** والمجلد **`/ (root)`** ثم اضغط **Save**.
+4. خلال أقل من دقيقة سيعمل الموقع تلقائياً على الرابط:
+   - 🌐 **الموقع للزوار**: `https://taharbn12.github.io/Bac/`
+   - ⚙️ **لوحة التحكم**: `https://taharbn12.github.io/Bac/admin.html`
+
+> يتضمن المستودع ملف `.nojekyll` لضمان نشر ملفات HTML/CSS/JS مباشرة وبأسرع وقت دون معالجة إضافية.
 
 ## 📁 الملفات
 
