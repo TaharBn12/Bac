@@ -1992,5 +1992,16 @@ details[open] > summary .acc-chevron,
   .slot-lesson-title a, .sdh-title h2, .sched-hero-main h1 { color: #0f172a !important; }
 }
 
+/* تنسيق طيّ مسودات الفقرات ولوحة استعمال الزمن داخل لوحة الأدمن */
+.dyn-block-card.is-collapsed .dyn-block-head {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+#adminScheduleRoot .sched-hero {
+  margin-top: 0;
+}
+
+
 
 

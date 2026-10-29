@@ -77,7 +77,7 @@ Cloud.connect = function () {
   }
 };
 
-/* تحميل كل المحتوى من السحابة */
+/* تحميل كل المحتوى من السحابة (بما في ذلك استعمال الزمن المعتمد من الأدمن وعناصر الإكمال) */
 Cloud.loadAll = function () {
   var c = this.client;
   return Promise.resolve().then(function () {
@@ -85,10 +85,12 @@ Cloud.loadAll = function () {
       c.from('subjects').select('*'),
       c.from('units').select('*'),
       c.from('lessons').select('*'),
-      c.from('resources').select('*')
+      c.from('resources').select('*'),
+      c.from('aya_study_schedule').select('*').then(function (r) { return r; }, function () { return { data: null, error: null }; }),
+      c.from('aya_completed_items').select('*').then(function (r) { return r; }, function () { return { data: null, error: null }; })
     ]);
   }).then(function (rs) {
-    for (var i = 0; i < rs.length; i++) {
+    for (var i = 0; i < 4; i++) {
       if (rs[i] && rs[i].error) throw rs[i].error;
     }
     var d = {
@@ -98,8 +100,75 @@ Cloud.loadAll = function () {
       resources: (rs[3].data || []).map(rowToResource).sort(byOrder)
     };
     Cloud.snapshot = snapshotOf(d);
+
+    /* قراءة استعمال الزمن المعتمد من الإدارة (إن وُجد في السحابة) */
+    if (rs[4] && !rs[4].error && Array.isArray(rs[4].data)) {
+      var schedObj = { plan: null, settings: null };
+      rs[4].data.forEach(function (row) {
+        if (row.id === 'plan' && row.payload && typeof row.payload === 'object') schedObj.plan = row.payload;
+        if (row.id === 'settings' && row.payload && typeof row.payload === 'object') schedObj.settings = row.payload;
+      });
+      window.CLOUD_SCHEDULE = schedObj;
+      try {
+        if (schedObj.plan) localStorage.setItem('ayaBacSchedulePlan.v1', JSON.stringify(schedObj.plan));
+        if (schedObj.settings) localStorage.setItem('ayaBacScheduleSettings.v1', JSON.stringify(schedObj.settings));
+      } catch (e) { /* تجاهل */ }
+    }
+
+    /* قراءة الدروس والتمارين المكتملة باللون الأخضر ومزامنتها */
+    if (rs[5] && !rs[5].error && Array.isArray(rs[5].data)) {
+      var cloudDoneMap = {};
+      rs[5].data.forEach(function (row) {
+        if (row && row.item_id) {
+          cloudDoneMap[row.item_id] = { completedAt: row.completed_at || new Date().toISOString() };
+        }
+      });
+      window.CLOUD_COMPLETED = cloudDoneMap;
+      try {
+        localStorage.setItem('ayaBacCompleted.v1', JSON.stringify(cloudDoneMap));
+      } catch (e2) { /* تجاهل */ }
+    }
+
     return d;
   });
+};
+
+/* حفظ استعمال الزمن وإعداداته من لوحة التحكم (للأدمن فقط عبر x-admin-key) */
+Cloud.saveSchedule = function (plan, settings) {
+  if (this.mode !== 'cloud') return Promise.resolve(false);
+  var c = this._writer();
+  if (!c) return Promise.resolve(false);
+  var nowIso = new Date().toISOString();
+  var rows = [];
+  if (plan) rows.push({ id: 'plan', payload: plan, updated_at: nowIso });
+  if (settings) rows.push({ id: 'settings', payload: settings, updated_at: nowIso });
+  if (!rows.length) return Promise.resolve(true);
+
+  window.CLOUD_SCHEDULE = window.CLOUD_SCHEDULE || { plan: null, settings: null };
+  if (plan) window.CLOUD_SCHEDULE.plan = plan;
+  if (settings) window.CLOUD_SCHEDULE.settings = settings;
+
+  return c.from('aya_study_schedule').upsert(rows, { onConflict: 'id' }).then(function (res) {
+    if (res && res.error) throw res.error;
+    return true;
+  }).catch(function (err) {
+    console.warn('تعذّر حفظ استعمال الزمن في السحابة:', err);
+    return false;
+  });
+};
+
+/* مزامنة حالة إكمال درس أو تمرين في السحابة */
+Cloud.syncCompletedItem = function (itemId, completed) {
+  if (this.mode !== 'cloud' || !this.client || !itemId) return Promise.resolve(false);
+  var c = this.client;
+  if (completed) {
+    return c.from('aya_completed_items').upsert(
+      [{ item_id: String(itemId), completed_at: new Date().toISOString() }],
+      { onConflict: 'item_id' }
+    ).then(function () { return true; }, function () { return false; });
+  }
+  return c.from('aya_completed_items').delete().eq('item_id', String(itemId))
+    .then(function () { return true; }, function () { return false; });
 };
 
 Cloud.isEmpty = function (d) {

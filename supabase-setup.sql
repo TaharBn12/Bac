@@ -137,6 +137,51 @@ create policy "media_admin_delete" on storage.objects
     and (storage.foldername(name))[1] = 'up-aya2027'
   );
 
+-- ---------- 5) استعمال الزمن الأسبوعي (يُضاف ويُعدّل من الأدمن فقط) + إكمال الدروس ----------
+create table if not exists public.aya_study_schedule (
+  id         text primary key check (char_length(id) <= 64),
+  payload    jsonb not null default '{}'::jsonb,
+  updated_at timestamptz not null default now()
+);
+
+alter table public.aya_study_schedule enable row level security;
+
+drop policy if exists "public_read"  on public.aya_study_schedule;
+drop policy if exists "admin_insert" on public.aya_study_schedule;
+drop policy if exists "admin_update" on public.aya_study_schedule;
+drop policy if exists "admin_delete" on public.aya_study_schedule;
+
+create policy "public_read" on public.aya_study_schedule
+  for select using (true);
+
+create policy "admin_insert" on public.aya_study_schedule
+  for insert with check (current_setting('request.headers', true)::json ->> 'x-admin-key' = 'taha 2026');
+
+create policy "admin_update" on public.aya_study_schedule
+  for update
+  using (current_setting('request.headers', true)::json ->> 'x-admin-key' = 'taha 2026')
+  with check (current_setting('request.headers', true)::json ->> 'x-admin-key' = 'taha 2026');
+
+create policy "admin_delete" on public.aya_study_schedule
+  for delete using (current_setting('request.headers', true)::json ->> 'x-admin-key' = 'taha 2026');
+
+create table if not exists public.aya_completed_items (
+  item_id      text primary key check (char_length(item_id) between 1 and 120),
+  completed_at timestamptz not null default now()
+);
+
+alter table public.aya_completed_items enable row level security;
+
+drop policy if exists "completed_public_read"   on public.aya_completed_items;
+drop policy if exists "completed_public_insert" on public.aya_completed_items;
+drop policy if exists "completed_public_update" on public.aya_completed_items;
+drop policy if exists "completed_public_delete" on public.aya_completed_items;
+
+create policy "completed_public_read"   on public.aya_completed_items for select using (true);
+create policy "completed_public_insert" on public.aya_completed_items for insert with check (char_length(item_id) between 1 and 120);
+create policy "completed_public_update" on public.aya_completed_items for update using (true) with check (char_length(item_id) between 1 and 120);
+create policy "completed_public_delete" on public.aya_completed_items for delete using (true);
+
 -- ---------- تم! ✅ ----------
 -- بعد التنفيذ بنجاح افتح لوحة التحكم (admin.html):
 -- سترى شارة «☁️ متصل بالسحابة» أعلى اللوحة.

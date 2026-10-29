@@ -1,9 +1,8 @@
 /* ============================================================
    آية باك 2027 — استعمال الزمن الدراسي الأسبوعي الذكي
-   - يتجدد تلقائياً كل يوم سبت على الساعة 22:00 (10:00 ليلاً)
-   - يوزّع الحصص والدروس حسب معامل كل مادة وبالتسلسل المنهجي للدروس
-   - يلوّن الدروس/التمارين المكتملة بالأخضر في الأسبوع الحالي ويستبعدها من الأسبوع القادم
-   - يدعم التعديل اليدوي الكامل (إضافة / تعديل / نقل / حذف / تخصيص الفترات)
+   - إضافة وتعديل وتخصيص استعمال الزمن تتم حصرياً من لوحة التحكم (admin.html)
+   - صفحة المستخدم (schedule.html) مخصّصة لعرض الجدول ومتابعة الدروس وتحديدها كمكتملة باللون الأخضر
+   - يتجدد تلقائياً كل يوم سبت على الساعة 22:00 (10:00 ليلاً) مع استبعاد الدروس المكتملة
    ============================================================ */
 'use strict';
 
@@ -28,42 +27,52 @@ var DEFAULT_PERIODS = [
   { label: 'حصة إضافية',      time: '16:30 - 18:00' }
 ];
 
-function loadScheduleSettings() {
+function normalizeScheduleSettings(parsed) {
   var defaults = {
     sessionsPerDay: 3,
-    lightDayIdx: 5,          /* الجمعة يوم مخفّف افتراضياً (حصتان بدل 3، أو -1 لإلغاء التخفيف) */
+    lightDayIdx: 5,          /* الجمعة يوم مخفّف افتراضياً */
     includeExercises: true,  /* إدراج تمارين الوحدة ضمن تسلسل المراجعة */
+    autoRenew: true,         /* التجديد التلقائي كل سبت على 10:00 ليلاً */
     periods: DEFAULT_PERIODS.map(function (p) { return { label: p.label, time: p.time }; })
   };
-  try {
-    var raw = localStorage.getItem(SCHED_SETTINGS_KEY);
-    if (!raw) return defaults;
-    var parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') return defaults;
-    var spd = Math.max(1, Math.min(5, parseInt(parsed.sessionsPerDay, 10) || 3));
-    var light = typeof parsed.lightDayIdx === 'number' ? parsed.lightDayIdx : 5;
-    var incEx = parsed.includeExercises !== false;
-    var periods = Array.isArray(parsed.periods) && parsed.periods.length >= 5
-      ? parsed.periods
-      : defaults.periods;
-    return {
-      sessionsPerDay: spd,
-      lightDayIdx: light,
-      includeExercises: incEx,
-      periods: periods
-    };
-  } catch (e) {
-    return defaults;
+  if (!parsed || typeof parsed !== 'object') return defaults;
+  var spd = Math.max(1, Math.min(5, parseInt(parsed.sessionsPerDay, 10) || 3));
+  var light = typeof parsed.lightDayIdx === 'number' ? parsed.lightDayIdx : 5;
+  var incEx = parsed.includeExercises !== false;
+  var autoRen = parsed.autoRenew !== false;
+  var periods = Array.isArray(parsed.periods) && parsed.periods.length >= 4
+    ? parsed.periods.map(function (p, i) {
+        var fb = DEFAULT_PERIODS[i] || DEFAULT_PERIODS[0];
+        return { label: (p && p.label) || fb.label, time: (p && p.time) || fb.time };
+      })
+    : defaults.periods;
+  while (periods.length < 5) {
+    periods.push({ label: DEFAULT_PERIODS[periods.length].label, time: DEFAULT_PERIODS[periods.length].time });
   }
+  return {
+    sessionsPerDay: spd,
+    lightDayIdx: light,
+    includeExercises: incEx,
+    autoRenew: autoRen,
+    periods: periods
+  };
 }
 
-function saveScheduleSettings(settings) {
+function loadScheduleSettings() {
+  if (window.CLOUD_SCHEDULE && window.CLOUD_SCHEDULE.settings) {
+    return normalizeScheduleSettings(window.CLOUD_SCHEDULE.settings);
+  }
   try {
-    localStorage.setItem(SCHED_SETTINGS_KEY, JSON.stringify(settings));
+    var raw = localStorage.getItem(SCHED_SETTINGS_KEY);
+    if (raw) return normalizeScheduleSettings(JSON.parse(raw));
   } catch (e) { /* تجاهل */ }
+  return normalizeScheduleSettings(null);
 }
 
 function loadSavedPlan() {
+  if (window.CLOUD_SCHEDULE && window.CLOUD_SCHEDULE.plan && Array.isArray(window.CLOUD_SCHEDULE.plan.slots)) {
+    return window.CLOUD_SCHEDULE.plan;
+  }
   try {
     var raw = localStorage.getItem(SCHED_PLAN_KEY);
     if (!raw) return null;
@@ -74,21 +83,36 @@ function loadSavedPlan() {
   }
 }
 
-function savePlan(plan) {
-  try {
-    localStorage.setItem(SCHED_PLAN_KEY, JSON.stringify(plan));
-  } catch (e) { /* تجاهل */ }
+/* حفظ الخطة والإعدادات (وعند الحفظ من الأدمن يتم رفعها فوراً إلى سحابة Supabase) */
+function persistScheduleState(plan, settings, syncToCloud) {
+  if (plan) {
+    try { localStorage.setItem(SCHED_PLAN_KEY, JSON.stringify(plan)); } catch (e) { /* تجاهل */ }
+    if (window.CLOUD_SCHEDULE) window.CLOUD_SCHEDULE.plan = plan;
+  }
+  if (settings) {
+    try { localStorage.setItem(SCHED_SETTINGS_KEY, JSON.stringify(settings)); } catch (e2) { /* تجاهل */ }
+    if (window.CLOUD_SCHEDULE) window.CLOUD_SCHEDULE.settings = settings;
+  }
+  if (syncToCloud && typeof Cloud !== 'undefined' && Cloud && Cloud.mode === 'cloud' && typeof Cloud.saveSchedule === 'function') {
+    return Cloud.saveSchedule(plan, settings);
+  }
+  return Promise.resolve(true);
 }
 
 /* بناء التسلسل الكامل المرتب لعناصر المادة (الوحدة 1: دروسها بالترتيب ثم تمارينها، تليها الوحدة 2...) */
 function buildSubjectSequence(data, subject, includeExercises) {
   var seq = [];
-  var units = unitsOf(data, subject.id);
+  /* نستخدم includeHidden=false دائماً في استعمال الزمن لئلا تدرج عناصر مخفية عن الطلاب */
+  var units = (data.units || []).filter(function (u) {
+    return u.subjectId === subject.id && !u.hidden;
+  }).sort(byOrder);
   var lessonSeqNum = 0;
   var exSeqNum = 0;
 
   units.forEach(function (u, uIdx) {
-    var ls = lessonsOf(data, u.id);
+    var ls = (data.lessons || []).filter(function (l) {
+      return l.unitId === u.id && !isExerciseItem(l) && !l.hidden;
+    }).sort(byOrder);
     ls.forEach(function (l, lIdx) {
       lessonSeqNum++;
       seq.push({
@@ -105,7 +129,9 @@ function buildSubjectSequence(data, subject, includeExercises) {
     });
 
     if (includeExercises) {
-      var exs = unitExercisesOf(data, u.id);
+      var exs = (data.lessons || []).filter(function (l) {
+        return l.unitId === u.id && isExerciseItem(l) && !l.hidden;
+      }).sort(byOrder);
       exs.forEach(function (ex, eIdx) {
         exSeqNum++;
         seq.push({
@@ -126,7 +152,10 @@ function buildSubjectSequence(data, subject, includeExercises) {
   return seq;
 }
 
-/* حساب سعة الأيام الـ 7 حسب إعدادات المستخدم */
+function nonHiddenSubjectsOf(data) {
+  return (data.subjects || []).filter(function (s) { return !s.hidden; }).sort(byOrder);
+}
+
 function buildDayCapacities(settings) {
   return WEEK_DAYS.map(function (d) {
     if (settings.lightDayIdx === d.idx) {
@@ -136,7 +165,7 @@ function buildDayCapacities(settings) {
   });
 }
 
-/* توزيع الحصص الأسبوعية بين المواد تناسبياً مع معامل كل مادة (طريقة البواقي الكبرى Hamilton) */
+/* توزيع الحصص الأسبوعية بين المواد تناسبياً مع معامل كل مادة (طريقة Hamilton للبواقي الكبرى) */
 function allocateQuotasByCoefficient(subjects, totalSlots) {
   if (!subjects.length || totalSlots <= 0) return {};
   var sumCoeff = subjects.reduce(function (s, sub) { return s + getSubjectCoefficient(sub); }, 0);
@@ -150,14 +179,12 @@ function allocateQuotasByCoefficient(subjects, totalSlots) {
     var coeff = getSubjectCoefficient(sub);
     var exact = (coeff / sumCoeff) * totalSlots;
     var base = Math.floor(exact);
-    /* إذا كان عدد الحصص الإجمالي يكفي جميع المواد نضمن حصة واحدة على الأقل لكل مادة */
     if (totalSlots >= subjects.length && base === 0) base = 1;
     quotas[sub.id] = base;
     assigned += base;
     remainders.push({ id: sub.id, rem: exact - Math.floor(exact), coeff: coeff, idx: idx });
   });
 
-  /* ضبط الفائض أو النقص ليطابق إجمالي الحصص الأسبوعية تماماً */
   while (assigned > totalSlots) {
     remainders.sort(function (a, b) { return a.coeff - b.coeff || a.rem - b.rem; });
     for (var i = 0; i < remainders.length && assigned > totalSlots; i++) {
@@ -182,14 +209,13 @@ function allocateQuotasByCoefficient(subjects, totalSlots) {
   return quotas;
 }
 
-/* توليد جدول الأسبوع تلقائياً لدورة السبت 22:00 الحالية (يستبعد كل ما أُكمل سابقاً!) */
+/* توليد جدول الأسبوع تلقائياً لدورة السبت 22:00 الحالية (بمعرّفات حتمية متطابقة بين كل الأجهزة واستبعاد ما أُكمل سابقاً) */
 function generateWeeklySchedulePlan(data, cycleInfo, settings) {
-  var subjects = visibleSubjectsOf(data);
+  var subjects = nonHiddenSubjectsOf(data);
   var dayCaps = buildDayCapacities(settings);
   var totalSlots = dayCaps.reduce(function (a, b) { return a + b; }, 0);
   var quotas = allocateQuotasByCoefficient(subjects, totalSlots);
 
-  /* بناء قائمة حصص كل مادة بالترتيب المنهجي (الدروس والتمارين غير المكتملة أولاً) */
   var bundlesBySubj = {};
   subjects.forEach(function (sub) {
     var q = quotas[sub.id] || 0;
@@ -214,7 +240,6 @@ function generateWeeklySchedulePlan(data, cycleInfo, settings) {
           sessionKind: target.itemType === 'exercise' ? 'exercise' : 'lesson'
         });
       } else if (pendingSeq.length > 0) {
-        /* إذا كان معامل المادة كبيراً يمنحها حصصاً إضافية بعد إنهاء الدروس المتاحة، نخصصها لتثبيت وحل تطبيقات على نفس دروس هذا الأسبوع */
         var reinforceTarget = pendingSeq[k % pendingSeq.length];
         subjSlots.push({
           subjectId: sub.id,
@@ -229,7 +254,6 @@ function generateWeeklySchedulePlan(data, cycleInfo, settings) {
           sessionKind: 'reinforce'
         });
       } else if (fullSeq.length > 0) {
-        /* كل دروس هذه المادة مكتملة! نضع حصة مراجعة شاملة خفيفة */
         subjSlots.push({
           subjectId: sub.id,
           itemId: '',
@@ -261,7 +285,6 @@ function generateWeeklySchedulePlan(data, cycleInfo, settings) {
     bundlesBySubj[sub.id] = subjSlots;
   });
 
-  /* توزيع متوازن على أيام الأسبوع الـ 7 بحيث لا تتكدس حصص نفس المادة في يوم واحد */
   var dayBuckets = WEEK_DAYS.map(function () { return []; });
   var sortedSubjs = subjects.slice().sort(function (a, b) {
     return getSubjectCoefficient(b) - getSubjectCoefficient(a);
@@ -271,7 +294,6 @@ function generateWeeklySchedulePlan(data, cycleInfo, settings) {
   sortedSubjs.forEach(function (sub) {
     var list = bundlesBySubj[sub.id] || [];
     list.forEach(function (slotItem) {
-      /* نبحث عن أفضل يوم متاح لم يمتلئ بعد ويحتوي أقل عدد من حصص هذه المادة */
       var bestDay = -1;
       var bestSameSubjCount = 999;
       var bestFillRatio = 999;
@@ -294,13 +316,12 @@ function generateWeeklySchedulePlan(data, cycleInfo, settings) {
     });
   });
 
-  /* تحويل السلال اليومية إلى مصفوفة حصص مرتبة مع أوقات الفترات */
   var finalSlots = [];
   dayBuckets.forEach(function (bucket, dIdx) {
     bucket.forEach(function (s, pIdx) {
       var per = settings.periods[pIdx] || DEFAULT_PERIODS[pIdx % DEFAULT_PERIODS.length];
       finalSlots.push({
-        id: uid('sl'),
+        id: 'sl-' + cycleInfo.cycleKey + '-' + dIdx + '-' + pIdx,
         dayIdx: dIdx,
         periodIdx: pIdx,
         periodLabel: per.label,
@@ -336,37 +357,115 @@ function fmtArabicShortDate(dt) {
   }
 }
 
-/* ============================================================
-   تهيئة وعرض صفحة استعمال الزمن (schedule.html)
-   ============================================================ */
-function initSchedulePage() {
-  requireAuth();
-  hydrateIcons();
-  var data = loadData();
+function slotCompletionKey(slot) {
+  if (!slot) return '';
+  return slot.itemId ? slot.itemId : ('slot:' + slot.id);
+}
 
-  $('#crumbs').innerHTML = breadcrumb([
-    { label: 'الرئيسية', href: 'home.html', icon: 'home' },
-    { label: 'استعمال الزمن الدراسي الأسبوعي' }
-  ]);
+/* ============================================================
+   مكوّن مشترك لعرض وإدارة استعمال الزمن:
+   - adminMode = false (في schedule.html): عرض الجدول للطالبة + زر الإكمال باللون الأخضر + الطباعة فقط (دون أي أزرار إضافة/تعديل ودون طيّ)
+   - adminMode = true  (في admin.html): تحكّم كامل من الأدمن (إضافة حصص، تعديل، نقل، حذف، إعدادات، توليد تلقائي، وطيّ البطاقات بزر السهم)
+   ============================================================ */
+function mountScheduleWorkspace(rootEl, opts) {
+  opts = opts || {};
+  var isAdmin = !!opts.adminMode;
+  var data = opts.data || loadData();
+
+  if (window._ayaActiveSchedTimer) {
+    clearInterval(window._ayaActiveSchedTimer);
+    window._ayaActiveSchedTimer = null;
+  }
 
   var settings = loadScheduleSettings();
   var cycle = getStudyCycleInfo();
   var plan = loadSavedPlan();
 
-  /* إذا لم تكن هناك خطة محفوظة أو دخلنا في دورة سبت 10:00 ليلاً جديدة → تتجدد تلقائياً! */
-  if (!plan || plan.cycleKey !== cycle.cycleKey) {
-    var wasPreviousCycle = !!(plan && plan.cycleKey && plan.cycleKey !== cycle.cycleKey);
+  /* منطق التجديد الأسبوعي كل سبت على 10:00 ليلاً:
+     - إذا وُجدت خطة سابقة معتمدة وحانت دورة السبت 10:00 ليلاً الجديدة مع تفعيل autoRenew -> تتجدد الخطة باستبعاد الدروس المكتملة.
+     - إذا لم يُنشئ الأدمن أي جدول بعد: في لوحة الأدمن يظهر زر الإنشاء/الإضافة الفوري، وفي صفحة المستخدم تظهر رسالة انتظار إضافة الجدول من الإدارة. */
+  if (plan && plan.cycleKey !== cycle.cycleKey && settings.autoRenew !== false && plan.slots && plan.slots.length > 0) {
     plan = generateWeeklySchedulePlan(data, cycle, settings);
-    savePlan(plan);
-    if (wasPreviousCycle) {
-      setTimeout(function () {
-        toast('تجدّد استعمال الزمن الأسبوعي تلقائياً (دورة السبت 10:00 ليلاً) مع استبعاد الدروس المكتملة!');
-      }, 300);
-    }
+    persistScheduleState(plan, settings, isAdmin);
+    setTimeout(function () {
+      toast('تجدّد استعمال الزمن الأسبوعي تلقائياً (دورة السبت 10:00 ليلاً) مع استبعاد الدروس المكتملة!');
+    }, 250);
+  }
+
+  if (!plan) {
+    plan = { cycleKey: cycle.cycleKey, generatedAt: null, quotas: {}, slots: [] };
   }
 
   var activeView = 'days'; /* 'days' | 'subjects' */
-  var openSubjectCards = {}; /* لفتح المادة الأولى فقط افتراضياً والبقية بزر سهم */
+  var adminOpenSubjCards = {}; /* الطيّ بزر السهم في موقع الأدمن فقط */
+
+  rootEl.innerHTML =
+    '<section class="sched-hero" id="schedHero">' +
+      '<div class="sched-hero-main">' +
+        '<div class="sched-kicker">' +
+          svgIcon(isAdmin ? 'gear' : 'sparkles') +
+          '<span>' + (isAdmin ? 'إدارة وبناء استعمال الزمن الأسبوعي (للأدمن فقط — يتزامن سحابياً مع موقع الطالبة)' : 'خطة دراسية أسبوعية مبنية على معامل كل مادة وتسلسل الدروس') + '</span>' +
+        '</div>' +
+        '<h1>' + (isAdmin ? 'إضافة وإدارة استعمال الزمن الدراسي' : 'استعمال الزمن الدراسي الأسبوعي') + '</h1>' +
+        '<p id="schedCycleDates"></p>' +
+        '<div class="sched-stats-row" id="schedStatsRow"></div>' +
+      '</div>' +
+      '<div class="sched-renewal-box">' +
+        '<div class="srb-head">' +
+          svgIcon('clock') +
+          '<span>التجديد التلقائي القادم (السبت 10:00 ليلاً)</span>' +
+        '</div>' +
+        '<div class="srb-countdown" id="schedCountdown" dir="ltr">' +
+          '<div class="cd-cell"><b id="cdDays">00</b><small>يوم</small></div>' +
+          '<span class="cd-sep">:</span>' +
+          '<div class="cd-cell"><b id="cdHours">00</b><small>ساعة</small></div>' +
+          '<span class="cd-sep">:</span>' +
+          '<div class="cd-cell"><b id="cdMins">00</b><small>دقيقة</small></div>' +
+          '<span class="cd-sep">:</span>' +
+          '<div class="cd-cell"><b id="cdSecs">00</b><small>ثانية</small></div>' +
+        '</div>' +
+        '<div class="srb-note">' +
+          (settings.autoRenew !== false
+            ? 'الدروس المكتملة تبقى باللون الأخضر هذا الأسبوع ولن توضع في جدول الأسبوع القادم'
+            : 'التجديد التلقائي متوقف حالياً من إعدادات الإدارة (جدول ثابت)') +
+        '</div>' +
+      '</div>' +
+    '</section>' +
+
+    '<div class="sched-toolbar">' +
+      '<div class="sched-view-tabs" role="tablist" aria-label="طريقة عرض استعمال الزمن">' +
+        '<button type="button" class="sched-vtab active" data-sview="days">' +
+          svgIcon('calendar') + ' <span>الجدول اليومي (الأحد ← السبت)</span>' +
+        '</button>' +
+        '<button type="button" class="sched-vtab" data-sview="subjects">' +
+          svgIcon('book') + ' <span>تفصيل المواد وما يجب قراءته بالترتيب</span>' +
+        '</button>' +
+      '</div>' +
+      '<div class="sched-actions">' +
+        (isAdmin
+          ? '<button type="button" class="btn btn-primary btn-sm" id="addManualSlotBtn">' +
+              svgIcon('plus') + ' إضافة حصة دراسية' +
+            '</button>' +
+            '<button type="button" class="btn btn-sm" id="regenSchedBtn" title="توليد أو تحديث استعمال الزمن تلقائياً حسب معامل كل مادة واستبعاد المكتمل">' +
+              svgIcon('wand') + ' توليد حسب المعاملات' +
+            '</button>' +
+            '<button type="button" class="btn btn-sm" id="openSchedSettingsBtn">' +
+              svgIcon('sliders') + ' إعدادات التوزيع والأوقات' +
+            '</button>' +
+            '<button type="button" class="btn btn-sm" id="clearSchedBtn" title="تفريغ كل الحصص لبناء جدول يدوي من الصفر">' +
+              svgIcon('trash') + ' تفريغ الجدول' +
+            '</button>' +
+            '<a class="btn btn-sm" href="schedule.html" target="_blank">' +
+              svgIcon('eye') + ' معاينة صفحة الطالبة' +
+            '</a>'
+          : '<button type="button" class="btn btn-sm" id="printSchedBtn" title="طباعة استعمال الزمن">' +
+              svgIcon('printer') + ' طباعة الجدول' +
+            '</button>') +
+      '</div>' +
+    '</div>' +
+
+    '<div class="sched-coeff-strip" id="schedCoeffStrip"></div>' +
+    '<div id="schedMainMount"></div>';
 
   function resolveSlotDetails(slot) {
     var subj = data.subjects.find(function (s) { return s.id === slot.subjectId; }) ||
@@ -377,7 +476,8 @@ function initSchedulePage() {
 
     var displayTitle = slot.customTitle || (itemObj ? itemObj.title : 'حصة مراجعة');
     var unitTitle = unitObj ? unitObj.title : (slot.unitTitle || '');
-    var completed = slot.itemId ? isItemCompleted(slot.itemId) : !!slot.manualDone;
+    var cKey = slotCompletionKey(slot);
+    var completed = cKey ? isItemCompleted(cKey) : !!slot.manualDone;
     var isEx = itemObj ? isExerciseItem(itemObj) : (slot.itemType === 'exercise');
 
     return {
@@ -394,67 +494,71 @@ function initSchedulePage() {
 
   function renderTopSummary() {
     cycle = getStudyCycleInfo();
-    $('#schedCycleDates').innerHTML =
-      svgIcon('calendar') + ' أسبوع المراجعة من <b>الأحد ' + fmtArabicShortDate(cycle.sundayStart) +
-      '</b> إلى <b>السبت ' + fmtArabicShortDate(cycle.saturdayEnd) + '</b> — يتجدد كل سبت على <b>10:00 ليلاً</b>';
+    var datesEl = $('#schedCycleDates', rootEl);
+    if (datesEl) {
+      datesEl.innerHTML =
+        svgIcon('calendar') + ' أسبوع المراجعة من <b>الأحد ' + fmtArabicShortDate(cycle.sundayStart) +
+        '</b> إلى <b>السبت ' + fmtArabicShortDate(cycle.saturdayEnd) + '</b> — يتجدد كل سبت على <b>10:00 ليلاً</b>';
+    }
 
     var totalWeekSlots = plan.slots.length;
     var doneWeekSlots = plan.slots.filter(function (sl) { return resolveSlotDetails(sl).completed; }).length;
     var pct = totalWeekSlots ? Math.round((doneWeekSlots / totalWeekSlots) * 100) : 0;
 
-    var allSubjects = visibleSubjectsOf(data);
+    var allSubjects = nonHiddenSubjectsOf(data);
     var totalCurr = 0, doneCurr = 0;
     allSubjects.forEach(function (s) {
-      unitsOf(data, s.id).forEach(function (u) {
-        lessonsOf(data, u.id).concat(unitExercisesOf(data, u.id)).forEach(function (it) {
-          totalCurr++;
-          if (isItemCompleted(it.id)) doneCurr++;
-        });
+      var seq = buildSubjectSequence(data, s, true);
+      totalCurr += seq.length;
+      seq.forEach(function (it) { if (it.completed) doneCurr++; });
+    });
+
+    var statsEl = $('#schedStatsRow', rootEl);
+    if (statsEl) {
+      statsEl.innerHTML =
+        '<div class="sched-stat-pill">' +
+          svgIcon('layers') +
+          '<div><b>' + totalWeekSlots + ' حصة هذا الأسبوع</b><small>موزعة على ' + allSubjects.length + ' مواد حسب المعامل</small></div>' +
+        '</div>' +
+        '<div class="sched-stat-pill done-stat">' +
+          svgIcon('check-circle') +
+          '<div><b>' + doneWeekSlots + ' / ' + totalWeekSlots + ' مكتمل بالأخضر (' + pct + '%)</b><small>في جدول هذا الأسبوع</small></div>' +
+        '</div>' +
+        '<div class="sched-stat-pill">' +
+          svgIcon('award') +
+          '<div><b>' + doneCurr + ' / ' + totalCurr + ' إجمالي المنهج المكتمل</b><small>يُستبعد تلقائياً في الأسبوع المقبل</small></div>' +
+        '</div>';
+    }
+
+    var stripEl = $('#schedCoeffStrip', rootEl);
+    if (stripEl) {
+      var sortedByCoeff = allSubjects.slice().sort(function (a, b) {
+        return getSubjectCoefficient(b) - getSubjectCoefficient(a);
       });
-    });
-
-    $('#schedStatsRow').innerHTML =
-      '<div class="sched-stat-pill">' +
-        svgIcon('layers') +
-        '<div><b>' + totalWeekSlots + ' حصة هذا الأسبوع</b><small>موزعة على ' + allSubjects.length + ' مواد حسب المعامل</small></div>' +
-      '</div>' +
-      '<div class="sched-stat-pill done-stat">' +
-        svgIcon('check-circle') +
-        '<div><b>' + doneWeekSlots + ' / ' + totalWeekSlots + ' مكتمل بالأخضر (' + pct + '%)</b><small>في جدول هذا الأسبوع</small></div>' +
-      '</div>' +
-      '<div class="sched-stat-pill">' +
-        svgIcon('award') +
-        '<div><b>' + doneCurr + ' / ' + totalCurr + ' إجمالي المنهج المكتمل</b><small>يُستبعد تلقائياً في الأسبوع المقبل</small></div>' +
-      '</div>';
-
-    /* شريط معاملات المواد وحصصها الأسبوعية */
-    var sortedByCoeff = allSubjects.slice().sort(function (a, b) {
-      return getSubjectCoefficient(b) - getSubjectCoefficient(a);
-    });
-    $('#schedCoeffStrip').innerHTML = sortedByCoeff.map(function (s) {
-      var c = getSubjectCoefficient(s);
-      var countInPlan = plan.slots.filter(function (sl) { return sl.subjectId === s.id; }).length;
-      return '<div class="coeff-chip c-' + (s.color || 'indigo') + '">' +
-        '<span class="cc-ico">' + iconHTML(s.icon, 'book') + '</span>' +
-        '<span class="cc-name">' + escapeHtml(s.name) + '</span>' +
-        '<span class="cc-val">معامل ' + c + '</span>' +
-        '<span class="cc-slots">' + countInPlan + ' ' + (countInPlan === 1 ? 'حصة' : 'حصص') + '</span>' +
-      '</div>';
-    }).join('');
+      stripEl.innerHTML = sortedByCoeff.map(function (s) {
+        var c = getSubjectCoefficient(s);
+        var countInPlan = plan.slots.filter(function (sl) { return sl.subjectId === s.id; }).length;
+        return '<div class="coeff-chip c-' + (s.color || 'indigo') + '">' +
+          '<span class="cc-ico">' + iconHTML(s.icon, 'book') + '</span>' +
+          '<span class="cc-name">' + escapeHtml(s.name) + '</span>' +
+          '<span class="cc-val">معامل ' + c + '</span>' +
+          '<span class="cc-slots">' + countInPlan + ' ' + (countInPlan === 1 ? 'حصة' : 'حصص') + '</span>' +
+        '</div>';
+      }).join('');
+    }
   }
 
-  /* تحديث العداد التنازلي كل ثانية + التجديد الفوري إن حانت الساعة 22:00 يوم السبت */
   function tickCountdown() {
     var nowCycle = getStudyCycleInfo();
-    if (nowCycle.cycleKey !== plan.cycleKey) {
+    if (nowCycle.cycleKey !== plan.cycleKey && settings.autoRenew !== false && plan.slots.length > 0) {
       plan = generateWeeklySchedulePlan(data, nowCycle, settings);
-      savePlan(plan);
+      persistScheduleState(plan, settings, isAdmin);
       renderAll();
       toast('حان موعد السبت 10:00 ليلاً — تم تجديد استعمال الزمن للأسبوع الجديد تلقائياً!');
       return;
     }
     var r = nowCycle.remaining;
-    var elD = $('#cdDays'), elH = $('#cdHours'), elM = $('#cdMins'), elS = $('#cdSecs');
+    var elD = $('#cdDays', rootEl), elH = $('#cdHours', rootEl), elM = $('#cdMins', rootEl), elS = $('#cdSecs', rootEl);
     if (elD) elD.textContent = String(r.days).padStart(2, '0');
     if (elH) elH.textContent = String(r.hours).padStart(2, '0');
     if (elM) elM.textContent = String(r.minutes).padStart(2, '0');
@@ -463,6 +567,19 @@ function initSchedulePage() {
 
   /* 1) العرض اليومي (الأحد ← السبت) */
   function renderDaysView(mount) {
+    if (!plan.slots.length) {
+      mount.innerHTML = isAdmin
+        ? '<div class="empty" style="padding:34px 20px">' +
+            '<p style="margin:0 0 14px;font-weight:800;font-size:1.05rem">لا توجد حصص مضافة في استعمال الزمن حالياً</p>' +
+            '<div style="display:flex;gap:10px;justify-content:center;flex-wrap:wrap">' +
+              '<button type="button" class="btn btn-primary" data-sact="quick-generate">' + svgIcon('wand') + ' توليد الجدول تلقائياً حسب معاملات المواد</button>' +
+              '<button type="button" class="btn" data-sact="add-to-day" data-day="0">' + svgIcon('plus') + ' إضافة أول حصة يدوياً</button>' +
+            '</div>' +
+          '</div>'
+        : '<div class="empty" style="padding:32px 20px">لم تقم الإدارة بإضافة حصص استعمال الزمن لهذا الأسبوع بعد</div>';
+      return;
+    }
+
     var todayJsDay = new Date().getDay();
 
     mount.innerHTML = '<div class="sched-days-grid">' + WEEK_DAYS.map(function (day) {
@@ -484,9 +601,11 @@ function initSchedulePage() {
               (dayDoneCount ? ' · <b class="txt-done">' + dayDoneCount + ' مكتمل ✓</b>' : '') +
             '</small>' +
           '</div>' +
-          '<button type="button" class="btn btn-sm" data-sact="add-to-day" data-day="' + day.idx + '">' +
-            svgIcon('plus') + ' حصة لهذا اليوم' +
-          '</button>' +
+          (isAdmin
+            ? '<button type="button" class="btn btn-sm" data-sact="add-to-day" data-day="' + day.idx + '">' +
+                svgIcon('plus') + ' حصة لهذا اليوم' +
+              '</button>'
+            : '') +
         '</header>' +
         '<div class="sched-slots-list">' +
           (daySlots.length ? daySlots.map(function (sl, sIdx) {
@@ -501,7 +620,7 @@ function initSchedulePage() {
               '<div class="slot-time-col">' +
                 '<span class="slot-period">' + escapeHtml(sl.periodLabel || ('الحصة ' + (sIdx + 1))) + '</span>' +
                 '<span class="slot-clock" dir="ltr">' + escapeHtml(sl.timeLabel || '') + '</span>' +
-                (sl.isManual ? '<span class="manual-tag">يدوي</span>' : '') +
+                (isAdmin && sl.isManual ? '<span class="manual-tag">يدوي</span>' : '') +
               '</div>' +
 
               '<div class="slot-main-col">' +
@@ -514,7 +633,7 @@ function initSchedulePage() {
                 (det.unitTitle ? '<div class="slot-unit-lbl">' + svgIcon('layers') + ' ' + escapeHtml(det.unitTitle) + '</div>' : '') +
                 '<div class="slot-lesson-title">' +
                   (det.item
-                    ? '<a href="lesson.html?lesson=' + encodeURIComponent(det.item.id) + '">' + escapeHtml(det.displayTitle) + '</a>'
+                    ? '<a href="lesson.html?lesson=' + encodeURIComponent(det.item.id) + '"' + (isAdmin ? ' target="_blank"' : '') + '>' + escapeHtml(det.displayTitle) + '</a>'
                     : escapeHtml(det.displayTitle)) +
                 '</div>' +
                 (sl.note ? '<div class="slot-note">' + escapeHtml(sl.note) + '</div>' : '') +
@@ -526,54 +645,59 @@ function initSchedulePage() {
                   '<span>' + (det.completed ? 'مكتمل ✓' : 'إكمال') + '</span>' +
                 '</button>' +
                 (det.item
-                  ? '<a class="btn btn-sm slot-open-btn" href="lesson.html?lesson=' + encodeURIComponent(det.item.id) + '" title="فتح صفحة الدرس أو التمرين">' +
+                  ? '<a class="btn btn-sm slot-open-btn" href="lesson.html?lesson=' + encodeURIComponent(det.item.id) + '"' + (isAdmin ? ' target="_blank"' : '') + ' title="فتح صفحة الدرس أو التمرين">' +
                       svgIcon('eye') + '<span>فتح</span>' +
                     '</a>'
                   : '') +
-                '<div class="slot-mini-tools">' +
-                  '<button type="button" class="mini-ic-btn" data-sact="move-up" data-id="' + sl.id + '" title="تقديم الفترة"' + (sIdx === 0 ? ' disabled' : '') + '>' + svgIcon('chevron-up') + '</button>' +
-                  '<button type="button" class="mini-ic-btn" data-sact="move-down" data-id="' + sl.id + '" title="تأخير الفترة"' + (sIdx === daySlots.length - 1 ? ' disabled' : '') + '>' + svgIcon('chevron-down') + '</button>' +
-                  '<button type="button" class="mini-ic-btn" data-sact="edit-slot" data-id="' + sl.id + '" title="تعديل يدوي للحصة">' + svgIcon('pencil') + '</button>' +
-                  '<button type="button" class="mini-ic-btn danger" data-sact="del-slot" data-id="' + sl.id + '" title="حذف الحصة من الجدول">' + svgIcon('trash') + '</button>' +
-                '</div>' +
+                (isAdmin
+                  ? '<div class="slot-mini-tools">' +
+                      '<button type="button" class="mini-ic-btn" data-sact="move-up" data-id="' + sl.id + '" title="تقديم الفترة"' + (sIdx === 0 ? ' disabled' : '') + '>' + svgIcon('chevron-up') + '</button>' +
+                      '<button type="button" class="mini-ic-btn" data-sact="move-down" data-id="' + sl.id + '" title="تأخير الفترة"' + (sIdx === daySlots.length - 1 ? ' disabled' : '') + '>' + svgIcon('chevron-down') + '</button>' +
+                      '<button type="button" class="mini-ic-btn" data-sact="edit-slot" data-id="' + sl.id + '" title="تعديل الحصة">' + svgIcon('pencil') + '</button>' +
+                      '<button type="button" class="mini-ic-btn danger" data-sact="del-slot" data-id="' + sl.id + '" title="حذف الحصة من الجدول">' + svgIcon('trash') + '</button>' +
+                    '</div>'
+                  : '') +
               '</div>' +
             '</article>';
-          }).join('') : '<div class="empty" style="padding:18px">يوم راحة — يمكنك إضافة حصة يدوية إن رغبتِ</div>') +
+          }).join('') : '<div class="empty" style="padding:18px">' + (isAdmin ? 'لا توجد حصص في هذا اليوم — اضغط «+ حصة لهذا اليوم» للإضافة' : 'يوم راحة ومراجعة خفيفة') + '</div>') +
         '</div>' +
       '</section>';
     }).join('') + '</div>';
   }
 
-  /* 2) عرض تفصيل كل مادة وما يجب قراءته بالترتيب المنهجي */
+  /* 2) عرض تفصيل كل مادة وما يجب قراءته بالترتيب المنهجي
+        - في موقع الأدمن (isAdmin = true): المادة الأولى مفتوحة والبقية قابلة للطي بزر السهم
+        - في موقع المستخدم (isAdmin = false): جميع المواد معروضة مفتوحة مباشرة دون طيّ */
   function renderSubjectsBreakdownView(mount) {
-    var subjects = visibleSubjectsOf(data).slice().sort(function (a, b) {
+    var subjects = nonHiddenSubjectsOf(data).slice().sort(function (a, b) {
       return getSubjectCoefficient(b) - getSubjectCoefficient(a);
     });
 
-    if (subjects.length && Object.keys(openSubjectCards).length === 0) {
-      openSubjectCards[subjects[0].id] = true; /* فتح المادة الأولى فقط افتراضياً والبقية بزر سهم */
+    if (isAdmin && subjects.length && Object.keys(adminOpenSubjCards).length === 0) {
+      adminOpenSubjCards[subjects[0].id] = true;
     }
 
     mount.innerHTML =
-      '<div class="sec-subtools-bar" style="margin-bottom:12px">' +
-        '<span class="hint" style="margin:0">تفصيل ما يجب قراءته في كل مادة مرتّباً حسب تسلسل الوحدات والدروس وبكثافة تتناسب مع معامل المادة:</span>' +
-        '<button type="button" class="btn btn-sm" id="toggleAllSubjPlanBtn">' + svgIcon('chevron-down') + ' فتح / طي كل المواد</button>' +
-      '</div>' +
+      (isAdmin
+        ? '<div class="sec-subtools-bar" style="margin-bottom:12px">' +
+            '<span class="hint" style="margin:0">المادة الأولى مفتوحة افتراضياً والبقية قابلة للطي بزر السهم:</span>' +
+            '<button type="button" class="btn btn-sm" id="toggleAllSubjPlanBtn">' + svgIcon('chevron-down') + ' فتح / طي كل المواد</button>' +
+          '</div>'
+        : '') +
       '<div class="sched-subjects-stack">' +
       subjects.map(function (sub) {
         var coeff = getSubjectCoefficient(sub);
         var subjSlots = plan.slots.filter(function (sl) { return sl.subjectId === sub.id; });
         var fullSeq = buildSubjectSequence(data, sub, settings.includeExercises);
         var doneInSubj = fullSeq.filter(function (it) { return it.completed; }).length;
-        var isOpen = !!openSubjectCards[sub.id];
+        var isOpen = isAdmin ? !!adminOpenSubjCards[sub.id] : true;
 
-        /* الدروس القادمة للأسبوع المقبل (التي تلي حصص هذا الأسبوع ولم تُكمل بعد) */
         var scheduledIds = {};
         subjSlots.forEach(function (sl) { if (sl.itemId) scheduledIds[sl.itemId] = true; });
         var nextWeekQueue = fullSeq.filter(function (it) { return !it.completed && !scheduledIds[it.itemId]; }).slice(0, 4);
 
         return '<section class="sched-subj-plan-card c-' + (sub.color || 'indigo') + (isOpen ? ' is-open' : ' is-collapsed') + '" data-sub-plan="' + sub.id + '">' +
-          '<div class="sspc-head" data-sact="toggle-subj-card" data-sub="' + sub.id + '" role="button" tabindex="0">' +
+          '<div class="sspc-head"' + (isAdmin ? ' data-sact="toggle-subj-card" data-sub="' + sub.id + '" role="button" tabindex="0"' : ' style="cursor:default"') + '>' +
             '<div class="sspc-title">' +
               '<div class="sspc-ico">' + iconHTML(sub.icon, 'book') + '</div>' +
               '<div>' +
@@ -581,9 +705,11 @@ function initSchedulePage() {
                 '<small>' + subjSlots.length + ' حصص مبرمجة هذا الأسبوع · أُنجز من المنهج ' + doneInSubj + ' من ' + fullSeq.length + '</small>' +
               '</div>' +
             '</div>' +
-            '<button type="button" class="btn-acc-arrow' + (isOpen ? ' open' : '') + '">' +
-              '<span>' + (isOpen ? 'إخفاء التفصيل' : 'إظهار ما يجب قراءته') + '</span>' + svgIcon('chevron-down') +
-            '</button>' +
+            (isAdmin
+              ? '<button type="button" class="btn-acc-arrow' + (isOpen ? ' open' : '') + '">' +
+                  '<span>' + (isOpen ? 'إخفاء التفصيل' : 'إظهار ما يجب قراءته') + '</span>' + svgIcon('chevron-down') +
+                '</button>'
+              : '') +
           '</div>' +
 
           '<div class="sspc-body"' + (isOpen ? '' : ' hidden') + '>' +
@@ -602,7 +728,7 @@ function initSchedulePage() {
                       '</div>' +
                       '<div class="sspc-step-title">' +
                         (det.item
-                          ? '<a href="lesson.html?lesson=' + encodeURIComponent(det.item.id) + '">' + escapeHtml(det.displayTitle) + '</a>'
+                          ? '<a href="lesson.html?lesson=' + encodeURIComponent(det.item.id) + '"' + (isAdmin ? ' target="_blank"' : '') + '>' + escapeHtml(det.displayTitle) + '</a>'
                           : escapeHtml(det.displayTitle)) +
                       '</div>' +
                     '</div>' +
@@ -617,10 +743,10 @@ function initSchedulePage() {
 
             (nextWeekQueue.length
               ? '<div class="sspc-next-queue">' +
-                  '<strong>' + svgIcon('clock') + ' الدروس التالية في الترتيب (ستُدرج تلقائياً في الأسبوع المقبل بعد إكمال الحالية):</strong>' +
+                  '<strong>' + svgIcon('clock') + ' الدروس التالية في الترتيب (تُدرج في الأسبوع المقبل بعد إكمال الحالية):</strong>' +
                   '<div class="sspc-next-chips">' +
                     nextWeekQueue.map(function (nq) {
-                      return '<a class="sspc-next-chip" href="lesson.html?lesson=' + encodeURIComponent(nq.itemId) + '">' +
+                      return '<a class="sspc-next-chip" href="lesson.html?lesson=' + encodeURIComponent(nq.itemId) + '"' + (isAdmin ? ' target="_blank"' : '') + '>' +
                         '#' + nq.seqNum + ' ' + escapeHtml(nq.title) + ' <small>(' + escapeHtml(nq.unitTitle) + ')</small>' +
                       '</a>';
                     }).join('') +
@@ -632,39 +758,45 @@ function initSchedulePage() {
       }).join('') +
       '</div>';
 
-    var toggleAllBtn = $('#toggleAllSubjPlanBtn', mount);
-    if (toggleAllBtn) {
-      toggleAllBtn.addEventListener('click', function () {
-        var anyClosed = subjects.some(function (s) { return !openSubjectCards[s.id]; });
-        subjects.forEach(function (s, idx) {
-          openSubjectCards[s.id] = anyClosed ? true : (idx === 0);
+    if (isAdmin) {
+      var toggleAllBtn = $('#toggleAllSubjPlanBtn', mount);
+      if (toggleAllBtn) {
+        toggleAllBtn.addEventListener('click', function () {
+          var anyClosed = subjects.some(function (s) { return !adminOpenSubjCards[s.id]; });
+          subjects.forEach(function (s, idx) {
+            adminOpenSubjCards[s.id] = anyClosed ? true : (idx === 0);
+          });
+          renderSubjectsBreakdownView(mount);
         });
-        renderSubjectsBreakdownView(mount);
-      });
+      }
     }
   }
 
   function renderAll() {
     renderTopSummary();
-    var mount = $('#schedMainMount');
+    var mount = $('#schedMainMount', rootEl);
+    if (!mount) return;
     if (activeView === 'days') renderDaysView(mount);
     else renderSubjectsBreakdownView(mount);
   }
 
-  /* نافذة إضافة أو تعديل حصة يدوياً */
+  /* نوافذ الإضافة والتعديل والإعدادات متاحة حصرياً للأدمن (isAdmin === true) */
   function openSlotEditorModal(existingSlot, defaultDayIdx) {
+    if (!isAdmin) return;
     var old = document.querySelector('.modal-overlay');
     if (old) old.remove();
 
-    var subjects = visibleSubjectsOf(data);
+    var subjects = nonHiddenSubjectsOf(data);
     if (!subjects.length) { toast('لا توجد مواد متاحة حالياً', 'err'); return; }
 
     var isEdit = !!existingSlot;
     var curDay = isEdit ? existingSlot.dayIdx : (typeof defaultDayIdx === 'number' ? defaultDayIdx : 0);
+    var existingDayCount = plan.slots.filter(function (x) { return x.dayIdx === curDay; }).length;
+    var defPerObj = settings.periods[existingDayCount % settings.periods.length] || DEFAULT_PERIODS[0];
     var curSubjId = isEdit ? existingSlot.subjectId : subjects[0].id;
     var curItemId = isEdit ? (existingSlot.itemId || '') : '';
-    var curPeriod = isEdit ? (existingSlot.periodLabel || DEFAULT_PERIODS[0].label) : DEFAULT_PERIODS[0].label;
-    var curTime   = isEdit ? (existingSlot.timeLabel || DEFAULT_PERIODS[0].time) : DEFAULT_PERIODS[0].time;
+    var curPeriod = isEdit ? (existingSlot.periodLabel || defPerObj.label) : defPerObj.label;
+    var curTime   = isEdit ? (existingSlot.timeLabel || defPerObj.time) : defPerObj.time;
     var curCustom = isEdit ? (existingSlot.customTitle || '') : '';
     var curNote   = isEdit ? (existingSlot.note || '') : '';
 
@@ -672,7 +804,7 @@ function initSchedulePage() {
     overlay.className = 'modal-overlay';
     overlay.innerHTML =
       '<div class="modal" role="dialog" aria-modal="true" style="max-width:540px">' +
-        '<h3>' + svgIcon(isEdit ? 'pencil' : 'plus') + ' ' + (isEdit ? 'تعديل الحصة الدراسية يدوياً' : 'إضافة حصة دراسية يدوية') + '</h3>' +
+        '<h3>' + svgIcon(isEdit ? 'pencil' : 'plus') + ' ' + (isEdit ? 'تعديل الحصة الدراسية' : 'إضافة حصة إلى استعمال الزمن') + '</h3>' +
         '<div class="field">' +
           '<span>اليوم</span>' +
           '<select class="inp" id="slDaySel">' +
@@ -705,16 +837,16 @@ function initSchedulePage() {
           '<select class="inp" id="slItemSel"></select>' +
         '</div>' +
         '<div class="field">' +
-          '<span>عنوان مخصص للحصة (اختياري — اتركيه فارغاً لاعتماد عنوان الدرس المختار)</span>' +
+          '<span>عنوان مخصص للحصة (اختياري — اتركه فارغاً لاعتماد عنوان الدرس المختار)</span>' +
           '<input class="inp" id="slCustomInp" value="' + escapeHtml(curCustom) + '" placeholder="مثال: حل موضوع بكالوريا 2025 / مراجعة القوانين">' +
         '</div>' +
         '<div class="field">' +
-          '<span>ملاحظة صغيرة (اختياري)</span>' +
+          '<span>ملاحظة توجيهية للطالبة (اختياري)</span>' +
           '<input class="inp" id="slNoteInp" value="' + escapeHtml(curNote) + '" placeholder="مثال: التركيز على المناقشة البيانية">' +
         '</div>' +
         '<div class="acts">' +
           '<button type="button" class="btn" data-close>' + svgIcon('x') + ' إلغاء</button>' +
-          '<button type="button" class="btn btn-primary" id="slSaveBtn">' + svgIcon('check') + ' حفظ الحصة</button>' +
+          '<button type="button" class="btn btn-primary" id="slSaveBtn">' + svgIcon('check') + ' حفظ في استعمال الزمن</button>' +
         '</div>' +
       '</div>';
 
@@ -758,6 +890,8 @@ function initSchedulePage() {
       var foundItem = chosenItem ? data.lessons.find(function (l) { return l.id === chosenItem; }) : null;
       var foundUnit = foundItem ? data.units.find(function (u) { return u.id === foundItem.unitId; }) : null;
 
+      plan.cycleKey = getStudyCycleInfo().cycleKey;
+
       if (isEdit) {
         existingSlot.dayIdx = chosenDay;
         existingSlot.subjectId = chosenSubj;
@@ -792,15 +926,15 @@ function initSchedulePage() {
         });
       }
 
-      savePlan(plan);
+      persistScheduleState(plan, settings, true);
       close();
       renderAll();
-      toast(isEdit ? 'تم حفظ التعديلات على الحصة' : 'تمت إضافة الحصة اليدوية إلى استعمال الزمن');
+      toast(isEdit ? 'تم حفظ تعديلات الحصة ومزامنتها سحابياً' : 'تمت إضافة الحصة في استعمال الزمن ومزامنتها سحابياً');
     });
   }
 
-  /* نافذة إعدادات التوزيع والأوقات */
   function openScheduleSettingsModal() {
+    if (!isAdmin) return;
     var old = document.querySelector('.modal-overlay');
     if (old) old.remove();
 
@@ -808,7 +942,7 @@ function initSchedulePage() {
     overlay.className = 'modal-overlay';
     overlay.innerHTML =
       '<div class="modal" role="dialog" aria-modal="true" style="max-width:540px">' +
-        '<h3>' + svgIcon('sliders') + ' إعدادات توزيع استعمال الزمن</h3>' +
+        '<h3>' + svgIcon('sliders') + ' إعدادات استعمال الزمن الأسبوعي (للأدمن)</h3>' +
         '<div class="field">' +
           '<span>عدد الحصص اليومية المعتادة</span>' +
           '<select class="inp" id="stSessionsPerDay">' +
@@ -826,12 +960,16 @@ function initSchedulePage() {
             }).join('') +
           '</select>' +
         '</div>' +
-        '<label class="copy-unit-check" style="margin:10px 0">' +
+        '<label class="copy-unit-check" style="margin:8px 0">' +
           '<input type="checkbox" id="stIncEx"' + (settings.includeExercises ? ' checked' : '') + '>' +
           '<span>إدراج التمارين المستقلة للوحدات تلقائياً بعد دروس كل وحدة</span>' +
         '</label>' +
+        '<label class="copy-unit-check" style="margin:8px 0">' +
+          '<input type="checkbox" id="stAutoRenew"' + (settings.autoRenew !== false ? ' checked' : '') + '>' +
+          '<span>تفعيل التجديد التلقائي كل يوم سبت على الساعة 10:00 ليلاً (مع استبعاد المكتمل)</span>' +
+        '</label>' +
         '<div class="field">' +
-          '<span>أوقات الفترات اليومية (يمكنك تعديلها بحرية)</span>' +
+          '<span>أوقات الفترات اليومية المعتمدة</span>' +
           '<div style="display:grid;gap:8px;margin-top:6px">' +
             settings.periods.slice(0, 4).map(function (p, idx) {
               return '<div class="frm-row" style="gap:8px">' +
@@ -843,7 +981,8 @@ function initSchedulePage() {
         '</div>' +
         '<div class="acts">' +
           '<button type="button" class="btn" data-close>' + svgIcon('x') + ' إلغاء</button>' +
-          '<button type="button" class="btn btn-primary" id="stApplyBtn">' + svgIcon('wand') + ' حفظ وإعادة توزيع الجدول</button>' +
+          '<button type="button" class="btn" id="stSaveOnlyBtn">' + svgIcon('check') + ' حفظ الإعدادات فقط</button>' +
+          '<button type="button" class="btn btn-primary" id="stApplyBtn">' + svgIcon('wand') + ' حفظ وتوليد الجدول الآن</button>' +
         '</div>' +
       '</div>';
 
@@ -852,10 +991,11 @@ function initSchedulePage() {
     overlay.querySelector('[data-close]').addEventListener('click', close);
     overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
 
-    $('#stApplyBtn', overlay).addEventListener('click', function () {
+    function collectSettingsForm() {
       settings.sessionsPerDay = +$('#stSessionsPerDay', overlay).value || 3;
       settings.lightDayIdx = +$('#stLightDay', overlay).value;
       settings.includeExercises = $('#stIncEx', overlay).checked;
+      settings.autoRenew = $('#stAutoRenew', overlay).checked;
       $all('[data-plbl]', overlay).forEach(function (inp) {
         var i = +inp.dataset.plbl;
         var tInp = $('[data-ptime="' + i + '"]', overlay);
@@ -864,41 +1004,73 @@ function initSchedulePage() {
           time: (tInp && tInp.value.trim()) || DEFAULT_PERIODS[i].time
         };
       });
-      saveScheduleSettings(settings);
-      plan = generateWeeklySchedulePlan(data, getStudyCycleInfo(), settings);
-      savePlan(plan);
+    }
+
+    $('#stSaveOnlyBtn', overlay).addEventListener('click', function () {
+      collectSettingsForm();
+      persistScheduleState(plan, settings, true);
       close();
       renderAll();
-      toast('تم حفظ الإعدادات وتوليد استعمال الزمن بالتوزيع الجديد!');
+      toast('تم حفظ إعدادات استعمال الزمن في السحابة');
+    });
+
+    $('#stApplyBtn', overlay).addEventListener('click', function () {
+      collectSettingsForm();
+      plan = generateWeeklySchedulePlan(data, getStudyCycleInfo(), settings);
+      persistScheduleState(plan, settings, true);
+      close();
+      renderAll();
+      toast('تم حفظ الإعدادات وتوليد استعمال الزمن ومزامنته سحابياً!');
     });
   }
 
-  /* أحداث شريط الأدوات */
-  $all('[data-sview]').forEach(function (tabBtn) {
+  /* أحداث تبديل العرض */
+  $all('[data-sview]', rootEl).forEach(function (tabBtn) {
     tabBtn.addEventListener('click', function () {
       activeView = tabBtn.dataset.sview;
-      $all('[data-sview]').forEach(function (x) { x.classList.toggle('active', x === tabBtn); });
+      $all('[data-sview]', rootEl).forEach(function (x) { x.classList.toggle('active', x === tabBtn); });
       renderAll();
     });
   });
 
-  $('#addManualSlotBtn').addEventListener('click', function () {
-    openSlotEditorModal(null, new Date().getDay());
-  });
-  $('#openSchedSettingsBtn').addEventListener('click', openScheduleSettingsModal);
-  $('#regenSchedBtn').addEventListener('click', function () {
-    if (!confirm('إعادة توليد استعمال الزمن لهذا الأسبوع تلقائياً حسب معامل كل مادة واستبعاد الدروس المكتملة؟ (سيتم استبدال التعديلات اليدوية الحالية)')) {
-      return;
-    }
-    plan = generateWeeklySchedulePlan(data, getStudyCycleInfo(), settings);
-    savePlan(plan);
-    renderAll();
-    toast('تم تحديث استعمال الزمن تلقائياً حسب المعاملات والدروس المتبقية!');
-  });
-  $('#printSchedBtn').addEventListener('click', function () { window.print(); });
+  if (isAdmin) {
+    var addBtn = $('#addManualSlotBtn', rootEl);
+    if (addBtn) addBtn.addEventListener('click', function () { openSlotEditorModal(null, new Date().getDay()); });
 
-  /* أحداث التفاعل داخل الجدول وتفصيل المواد */
-  $('#schedMainMount').addEventListener('click', function (e) {
+    var setBtn = $('#openSchedSettingsBtn', rootEl);
+    if (setBtn) setBtn.addEventListener('click', openScheduleSettingsModal);
+
+    var regenBtn = $('#regenSchedBtn', rootEl);
+    if (regenBtn) {
+      regenBtn.addEventListener('click', function () {
+        if (plan.slots.length && !confirm('توليد استعمال الزمن تلقائياً حسب معامل كل مادة وتسلسل الدروس غير المكتملة؟ (سيحل محل الحصص الحالية)')) {
+          return;
+        }
+        plan = generateWeeklySchedulePlan(data, getStudyCycleInfo(), settings);
+        persistScheduleState(plan, settings, true);
+        renderAll();
+        toast('تم توليد استعمال الزمن حسب المعاملات وحفظه في السحابة!');
+      });
+    }
+
+    var clearBtn = $('#clearSchedBtn', rootEl);
+    if (clearBtn) {
+      clearBtn.addEventListener('click', function () {
+        if (!plan.slots.length) { toast('الجدول فارغ بالفعل', 'info'); return; }
+        if (!confirm('تفريغ جميع حصص استعمال الزمن الحالي لبنائه يدوياً من الصفر؟')) return;
+        plan = { cycleKey: getStudyCycleInfo().cycleKey, generatedAt: new Date().toISOString(), quotas: {}, slots: [] };
+        persistScheduleState(plan, settings, true);
+        renderAll();
+        toast('تم تفريغ الجدول — يمكنك الآن إضافة الحصص يدوياً أو التوليد التلقائي', 'info');
+      });
+    }
+  } else {
+    var printBtn = $('#printSchedBtn', rootEl);
+    if (printBtn) printBtn.addEventListener('click', function () { window.print(); });
+  }
+
+  /* أحداث التفاعل داخل الجدول */
+  $('#schedMainMount', rootEl).addEventListener('click', function (e) {
     var btn = e.target.closest('[data-sact]');
     if (!btn) return;
     var act = btn.dataset.sact;
@@ -906,14 +1078,8 @@ function initSchedulePage() {
     var slot = slotId ? plan.slots.find(function (s) { return s.id === slotId; }) : null;
 
     if (act === 'toggle-done' && slot) {
-      var nowDone;
-      if (slot.itemId) {
-        nowDone = toggleItemCompleted(slot.itemId);
-      } else {
-        slot.manualDone = !slot.manualDone;
-        nowDone = slot.manualDone;
-        savePlan(plan);
-      }
+      var cKey = slotCompletionKey(slot);
+      var nowDone = toggleItemCompleted(cKey);
       renderAll();
       toast(
         nowDone
@@ -921,16 +1087,27 @@ function initSchedulePage() {
           : 'تم إلغاء علامة الإكمال عن هذه الحصة',
         nowDone ? 'ok' : 'info'
       );
+      return;
+    }
+
+    /* بقية الإجراءات الإدارية مسموحة للأدمن فقط */
+    if (!isAdmin) return;
+
+    if (act === 'quick-generate') {
+      plan = generateWeeklySchedulePlan(data, getStudyCycleInfo(), settings);
+      persistScheduleState(plan, settings, true);
+      renderAll();
+      toast('تم توليد استعمال الزمن الأسبوعي وحفظه في السحابة!');
     } else if (act === 'add-to-day') {
       openSlotEditorModal(null, +btn.dataset.day);
     } else if (act === 'edit-slot' && slot) {
       openSlotEditorModal(slot, slot.dayIdx);
     } else if (act === 'del-slot' && slot) {
-      if (confirm('حذف هذه الحصة من استعمال الزمن الحالي؟')) {
+      if (confirm('حذف هذه الحصة من استعمال الزمن؟')) {
         plan.slots = plan.slots.filter(function (s) { return s.id !== slot.id; });
-        savePlan(plan);
+        persistScheduleState(plan, settings, true);
         renderAll();
-        toast('تم حذف الحصة من الجدول', 'info');
+        toast('تم حذف الحصة وحفظ الجدول في السحابة', 'info');
       }
     } else if ((act === 'move-up' || act === 'move-down') && slot) {
       var sameDay = plan.slots
@@ -947,23 +1124,59 @@ function initSchedulePage() {
           slot.periodIdx = swapIdx;
           other.periodIdx = idx;
         }
-        savePlan(plan);
+        persistScheduleState(plan, settings, true);
         renderAll();
       }
     } else if (act === 'toggle-subj-card') {
       var subId = btn.dataset.sub;
-      openSubjectCards[subId] = !openSubjectCards[subId];
+      adminOpenSubjCards[subId] = !adminOpenSubjCards[subId];
       renderAll();
     }
   });
 
-  window.addEventListener('aya:completion-changed', function () {
-    renderAll();
-  });
+  if (!window._ayaSchedCompletionListenerBound) {
+    window._ayaSchedCompletionListenerBound = true;
+    window.addEventListener('aya:completion-changed', function () {
+      if (typeof window._ayaCurrentSchedRefresh === 'function') {
+        window._ayaCurrentSchedRefresh();
+      }
+    });
+  }
+  window._ayaCurrentSchedRefresh = renderAll;
 
   renderAll();
   tickCountdown();
-  setInterval(tickCountdown, 1000);
+  window._ayaActiveSchedTimer = setInterval(tickCountdown, 1000);
+}
 
-  $('#logoutBtn').addEventListener('click', doLogout);
+/* تهيئة صفحة المستخدم (schedule.html — عرض فقط + زر الإكمال الأخضر دون أزرار إضافة/تعديل) */
+function initSchedulePage() {
+  requireAuth();
+  hydrateIcons();
+  var data = loadData();
+
+  var crumbsEl = $('#crumbs');
+  if (crumbsEl) {
+    crumbsEl.innerHTML = breadcrumb([
+      { label: 'الرئيسية', href: 'home.html', icon: 'home' },
+      { label: 'استعمال الزمن الدراسي الأسبوعي' }
+    ]);
+  }
+
+  var rootEl = $('#studentScheduleRoot');
+  if (rootEl) {
+    mountScheduleWorkspace(rootEl, { adminMode: false, data: data });
+  }
+
+  var logoutBtn = $('#logoutBtn');
+  if (logoutBtn) logoutBtn.addEventListener('click', doLogout);
+}
+
+/* عرض لوحة إدارة وإضافة استعمال الزمن داخل admin.html (للأدمن فقط) */
+function renderAdminSchedulePanel(panelEl, adminData) {
+  panelEl.innerHTML = '<div id="adminScheduleRoot"></div>';
+  mountScheduleWorkspace($('#adminScheduleRoot', panelEl), {
+    adminMode: true,
+    data: adminData || loadData()
+  });
 }

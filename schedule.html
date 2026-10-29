@@ -28,72 +28,7 @@
 
   <main class="container page schedule-page">
     <div id="crumbs"></div>
-
-    <!-- الترويسة الاحترافية + العد التنازلي للتجديد التلقائي كل سبت 10:00 ليلاً -->
-    <section class="sched-hero" id="schedHero">
-      <div class="sched-hero-main">
-        <div class="sched-kicker">
-          <i data-icon="sparkles"></i>
-          <span>خطة دراسية ذكية مبنية على معامل كل مادة وتسلسل الدروس</span>
-        </div>
-        <h1>استعمال الزمن الدراسي الأسبوعي</h1>
-        <p id="schedCycleDates">يتجدد تلقائياً كل يوم سبت على الساعة 10:00 ليلاً مع استبعاد الدروس المكتملة من الأسبوع المقبل</p>
-
-        <div class="sched-stats-row" id="schedStatsRow"></div>
-      </div>
-
-      <div class="sched-renewal-box">
-        <div class="srb-head">
-          <i data-icon="clock"></i>
-          <span>التجديد التلقائي القادم (السبت 10:00 ليلاً)</span>
-        </div>
-        <div class="srb-countdown" id="schedCountdown" dir="ltr">
-          <div class="cd-cell"><b id="cdDays">00</b><small>يوم</small></div>
-          <span class="cd-sep">:</span>
-          <div class="cd-cell"><b id="cdHours">00</b><small>ساعة</small></div>
-          <span class="cd-sep">:</span>
-          <div class="cd-cell"><b id="cdMins">00</b><small>دقيقة</small></div>
-          <span class="cd-sep">:</span>
-          <div class="cd-cell"><b id="cdSecs">00</b><small>ثانية</small></div>
-        </div>
-        <div class="srb-note">الدروس المكتملة تبقى باللون الأخضر هذا الأسبوع ولن توضع في جدول الأسبوع القادم</div>
-      </div>
-    </section>
-
-    <!-- شريط الأدوات: تبديل العرض + التعديل اليدوي + التخصيص + الطباعة -->
-    <div class="sched-toolbar">
-      <div class="sched-view-tabs" role="tablist" aria-label="طريقة عرض استعمال الزمن">
-        <button type="button" class="sched-vtab active" data-sview="days">
-          <i data-icon="calendar"></i>
-          <span>الجدول اليومي (الأحد ← السبت)</span>
-        </button>
-        <button type="button" class="sched-vtab" data-sview="subjects">
-          <i data-icon="book"></i>
-          <span>تفصيل المواد وما يجب قراءته بالترتيب</span>
-        </button>
-      </div>
-
-      <div class="sched-actions">
-        <button type="button" class="btn btn-primary btn-sm" id="addManualSlotBtn">
-          <i data-icon="plus"></i> إضافة حصة يدوية
-        </button>
-        <button type="button" class="btn btn-sm" id="openSchedSettingsBtn">
-          <i data-icon="sliders"></i> إعدادات التوزيع والأوقات
-        </button>
-        <button type="button" class="btn btn-sm" id="regenSchedBtn" title="إعادة توليد الجدول تلقائياً حسب المعاملات والدروس غير المكتملة">
-          <i data-icon="wand"></i> إعادة توليد تلقائي
-        </button>
-        <button type="button" class="btn btn-sm" id="printSchedBtn" title="طباعة استعمال الزمن">
-          <i data-icon="printer"></i> طباعة
-        </button>
-      </div>
-    </div>
-
-    <!-- شريط الأوزان والمعاملات السريع -->
-    <div class="sched-coeff-strip" id="schedCoeffStrip"></div>
-
-    <!-- حاوية العرض الرئيسي -->
-    <div id="schedMainMount"></div>
+    <div id="studentScheduleRoot"></div>
   </main>
 
   <footer class="footer">آية باك 2027 — نظّمي وقتكِ بثقة نحو التميز في البكالوريا <i data-icon="dz"></i></footer>

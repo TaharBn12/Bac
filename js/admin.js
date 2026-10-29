@@ -25,6 +25,7 @@ var pickedFiles = {}; /* ملفات مختارة مؤقتاً في نماذج ا
 var adminOpenSections = {}; /* حفظ الأقسام المفتوحة لكل درس/تمرين (الأول مفتوح افتراضياً والبقية مطوية بسهم) */
 var adminOpenGroups = {};   /* حفظ المجموعات المفتوحة (المجموعة الأولى مفتوحة افتراضياً والبقية مطوية بسهم) */
 var adminOpenUnits = {};    /* حفظ الوحدات المفتوحة في لوحة الوحدات (الوحدة الأولى مفتوحة افتراضياً) */
+var adminOpenLessons = {};  /* حفظ الدروس المفتوحة في لوحة الدروس (الدرس الأول مفتوح افتراضياً والبقية مطوية بسهم) */
 
 function initAdmin() {
   hydrateIcons();
@@ -110,6 +111,13 @@ function showApp() {
       }
     }
     $all('.tab').forEach(function (x) { x.classList.toggle('active', x.dataset.tab === currentTab); });
+
+    var topSchedBtn = $('#topAdminSchedBtn');
+    if (topSchedBtn) {
+      topSchedBtn.addEventListener('click', function () {
+        goToAdminTab('schedule');
+      });
+    }
 
     $('#tabsNav').addEventListener('click', function (e) {
       var t = e.target.closest('.tab');
@@ -903,7 +911,12 @@ function duplicateSubject(id) {
 /* ============ عرض اللوحات ============ */
 function renderPanel() {
   var p = $('#panel');
+  if (currentTab !== 'schedule' && window._ayaActiveSchedTimer) {
+    clearInterval(window._ayaActiveSchedTimer);
+    window._ayaActiveSchedTimer = null;
+  }
   if (currentTab === 'subjects') renderSubjectsPanel(p);
+  else if (currentTab === 'schedule' && typeof renderAdminSchedulePanel === 'function') renderAdminSchedulePanel(p, data);
   else if (currentTab === 'ai' && typeof renderAiPanel === 'function') renderAiPanel(p);
   else if (currentTab === 'organizer') renderOrganizerPanel(p);
   else if (currentTab === 'units') renderUnitsPanel(p);
@@ -1183,7 +1196,7 @@ function renderSubjectsPanel(p) {
   p.innerHTML =
     '<div class="sec-head-row" style="margin-bottom:6px">' +
       '<h2 style="margin:0">' + svgIcon('book') + ' إدارة المواد ومعاملاتها</h2>' +
-      '<a class="btn btn-sm" href="schedule.html" target="_blank">' + svgIcon('calendar') + ' فتح استعمال الزمن الدراسي</a>' +
+      '<button type="button" class="btn btn-sm btn-primary" id="gotoAdminSchedBtn">' + svgIcon('calendar') + ' إضافة وإدارة استعمال الزمن</button>' +
     '</div>' +
     '<p class="hint">أضف مادة وحدّد <b>معاملها في البكالوريا</b> (يعتمد عليه الموقع تلقائياً لتكرار حصص المادة وتوزيع الدروس في استعمال الزمن الأسبوعي). يمكنك أيضاً إخفاء أي مادة مؤقتاً عن الطلاب.</p>' +
     '<div class="frm-card">' +
@@ -1226,6 +1239,11 @@ function renderSubjectsPanel(p) {
         '</div>';
       }).join('') : '<div class="empty">لا توجد مواد — أضف أول مادة أعلاه</div>') +
     '</div>';
+
+  var gotoSched = $('#gotoAdminSchedBtn', p);
+  if (gotoSched) {
+    gotoSched.addEventListener('click', function () { goToAdminTab('schedule'); });
+  }
 
   /* اقتراح المعامل تلقائياً أثناء كتابة اسم المادة */
   var coeffTouched = false;
@@ -1479,9 +1497,15 @@ function renderLessonsPanel(p) {
   if (!sel.subject || !getUnit(data, sel.unit)) { sel.unit = (unitsOf(data, sel.subject)[0] || {}).id || ''; }
   var list = sel.unit ? lessonsOf(data, sel.unit) : [];
 
+  /* في لوحة الأدمن: الدرس الأول مفتوح افتراضياً والبقية قابلة للطي بزر السهم */
+  if (sel.unit && list.length && !adminOpenLessons[sel.unit]) {
+    adminOpenLessons[sel.unit] = {};
+    adminOpenLessons[sel.unit][list[0].id] = true;
+  }
+
   p.innerHTML =
     '<h2>' + svgIcon('film') + ' إدارة الدروس</h2>' +
-    '<p class="hint">اختر المادة ثم الوحدة وأضف الدروس المرتبة (يعتمد استعمال الزمن الأسبوعي على هذا الترتيب التسلسلي للدروس).</p>' +
+    '<p class="hint">اختر المادة ثم الوحدة وأضف الدروس المرتبة (الدرس الأول مفتوح افتراضياً والبقية تطوى وتفتح بزر السهم).</p>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<select class="inp" id="lSubject">' + subjectOptions(sel.subject) + '</select>' +
@@ -1493,16 +1517,41 @@ function renderLessonsPanel(p) {
     '<div class="admin-list" id="lessonList">' +
       (list.length ? list.map(function (l, i) {
         var res = resourcesOf(data, l.id);
-        return '<div class="item-row' + (l.hidden ? ' is-hidden-row' : '') + '">' +
-          '<div class="item-ico">' + (i + 1) + '</div>' +
-          '<div class="item-info"><div class="item-title">' + escapeHtml(l.title) + hiddenPillHTML(l.hidden) + '</div>' +
-          '<div class="item-sub">' + res.length + ' عنصر محتوى</div></div>' +
-          actsHTML(l.id,
-            hideBtnHTML(l.id, l.hidden, 'إخفاء الدرس عن الطلاب', 'إظهار الدرس للطلاب') +
-            '<button class="icon-btn" data-act="copy" data-id="' + l.id + '" title="إنشاء نسخة">' + svgIcon('copy') + '</button>' +
-            '<button class="icon-btn" data-act="goto" data-id="' + l.id + '" title="إدارة المحتوى">' + svgIcon('plus') + '</button>' +
-            '<button class="icon-btn" data-act="view" data-id="' + l.id + '" title="معاينة الدرس">' + svgIcon('eye') + '</button>'
-          ) +
+        var vids = resourcesOf(data, l.id, 'video').length;
+        var pdfs = resourcesOf(data, l.id, 'pdf').length;
+        var imgs = resourcesOf(data, l.id, 'image').length;
+        var exs  = resourcesOf(data, l.id, 'exercise').length;
+        var isOpen = !!(adminOpenLessons[sel.unit] && adminOpenLessons[sel.unit][l.id]);
+
+        return '<div class="unit-acc-card' + (isOpen ? ' is-open' : '') + (l.hidden ? ' is-hidden-row' : '') + '">' +
+          '<div class="item-row unit-acc-head" data-lesson-head="' + l.id + '">' +
+            '<div class="item-ico">' + (i + 1) + '</div>' +
+            '<div class="item-info"><div class="item-title">' + escapeHtml(l.title) + hiddenPillHTML(l.hidden) + '</div>' +
+            '<div class="item-sub">' + res.length + ' عنصر محتوى</div></div>' +
+            actsHTML(l.id,
+              '<button type="button" class="btn-acc-arrow' + (isOpen ? ' open' : '') + '" data-act="toggle-open" data-id="' + l.id + '" title="' + (isOpen ? 'طي تفاصيل الدرس' : 'إظهار أقسام الدرس') + '">' +
+                '<span>' + (isOpen ? 'إخفاء' : 'إظهار') + '</span>' + svgIcon('chevron-down') +
+              '</button>' +
+              hideBtnHTML(l.id, l.hidden, 'إخفاء الدرس عن الطلاب', 'إظهار الدرس للطلاب') +
+              '<button class="icon-btn" data-act="copy" data-id="' + l.id + '" title="إنشاء نسخة">' + svgIcon('copy') + '</button>' +
+              '<button class="icon-btn" data-act="goto" data-id="' + l.id + '" title="إدارة المحتوى">' + svgIcon('plus') + '</button>' +
+              '<button class="icon-btn" data-act="view" data-id="' + l.id + '" title="معاينة الدرس">' + svgIcon('eye') + '</button>'
+            ) +
+          '</div>' +
+          (isOpen
+            ? '<div class="unit-acc-body">' +
+                '<div class="unit-acc-chips" style="margin-bottom:8px">' +
+                  '<span class="unit-mini-chip">' + svgIcon('film') + ' فيديوهات: ' + vids + '</span>' +
+                  '<span class="unit-mini-chip">' + svgIcon('file') + ' ملفات PDF: ' + pdfs + '</span>' +
+                  '<span class="unit-mini-chip">' + svgIcon('image') + ' صور: ' + imgs + '</span>' +
+                  '<span class="unit-mini-chip is-ex">' + svgIcon('pencil') + ' تمارين مرفقة: ' + exs + '</span>' +
+                '</div>' +
+                '<div class="unit-acc-quick">' +
+                  '<button type="button" class="btn btn-primary btn-sm" data-lquick="edit-content" data-id="' + l.id + '">' + svgIcon('plus') + ' إضافة وتعديل أقسام الدرس</button>' +
+                  '<a class="btn btn-sm" href="lesson.html?lesson=' + encodeURIComponent(l.id) + '" target="_blank">' + svgIcon('eye') + ' معاينة الدرس</a>' +
+                '</div>' +
+              '</div>'
+            : '') +
         '</div>';
       }).join('') : '<div class="empty">لا توجد دروس في هذه الوحدة — أضف درساً أعلاه</div>') +
     '</div>';
@@ -1519,14 +1568,39 @@ function renderLessonsPanel(p) {
     if (!sel.unit) { toast('اختر الوحدة أولاً', 'err'); return; }
     var t = $('#lTitle').value.trim();
     if (!t) { toast('اكتب عنوان الدرس', 'err'); return; }
+    var newLId = uid('l');
     data.lessons.push({
-      id: uid('l'), unitId: sel.unit, title: t, itemType: 'lesson',
+      id: newLId, unitId: sel.unit, title: t, itemType: 'lesson',
       order: (lessonsOf(data, sel.unit).reduce(function (m, l) { return Math.max(m, l.order || 0); }, 0) + 1)
     });
+    if (!adminOpenLessons[sel.unit]) adminOpenLessons[sel.unit] = {};
+    adminOpenLessons[sel.unit][newLId] = true;
     save(); renderPanel(); toast('تمت إضافة الدرس');
   });
 
+  $('#lessonList').addEventListener('click', function (e) {
+    var lq = e.target.closest('[data-lquick="edit-content"]');
+    if (lq) {
+      sel.lesson = lq.dataset.id;
+      goToAdminTab('content');
+      return;
+    }
+    if (e.target.closest('[data-act]')) return;
+    var head = e.target.closest('[data-lesson-head]');
+    if (head) {
+      var lid = head.dataset.lessonHead;
+      if (!adminOpenLessons[sel.unit]) adminOpenLessons[sel.unit] = {};
+      adminOpenLessons[sel.unit][lid] = !adminOpenLessons[sel.unit][lid];
+      renderPanel();
+    }
+  });
+
   bindList($('#lessonList'), {
+    toggleOpen: function (id) {
+      if (!adminOpenLessons[sel.unit]) adminOpenLessons[sel.unit] = {};
+      adminOpenLessons[sel.unit][id] = !adminOpenLessons[sel.unit][id];
+      renderPanel();
+    },
     toggleHide: function (id) {
       var l = getLesson(data, id);
       if (!l) return;
@@ -2140,37 +2214,49 @@ function renderDynamicComposer(mount, area, lesson, kind, cfg, opts) {
       '</div>';
     }).join('');
 
-    return '<div class="dyn-block-card">' +
+    var isBlkCollapsed = draft.blocks.length > 1 && !!blk.collapsed;
+    var blkSummaryTxt = blk.title ? (' — ' + blk.title) : '';
+    var blkCountTxt = (blk.files.length ? blk.files.length + ' ملف' : '') +
+      (blk.urls.filter(Boolean).length ? (blk.files.length ? ' + ' : '') + blk.urls.filter(Boolean).length + ' رابط' : '');
+
+    return '<div class="dyn-block-card' + (isBlkCollapsed ? ' is-collapsed' : '') + '">' +
       '<div class="dyn-block-head">' +
-        '<span class="dyn-block-badge">' + svgIcon('sparkles') + ' الفقرة / العنوان ' + (bIdx + 1) + '</span>' +
+        '<span class="dyn-block-badge">' + svgIcon('sparkles') + ' الفقرة / العنوان ' + (bIdx + 1) + escapeHtml(blkSummaryTxt) +
+          (blkCountTxt ? ' <small>(' + escapeHtml(blkCountTxt) + ')</small>' : '') +
+        '</span>' +
         '<div class="dyn-block-tools">' +
           (draft.blocks.length > 1
-            ? '<button type="button" class="mini-ic-btn" data-cact="blk-up" data-b="' + bIdx + '" title="تحريك الفقرة للأعلى"' + (bIdx === 0 || draft.saving ? ' disabled' : '') + '>' + svgIcon('chevron-up') + '</button>' +
+            ? '<button type="button" class="btn-acc-arrow' + (!isBlkCollapsed ? ' open' : '') + '" data-cact="blk-toggle" data-b="' + bIdx + '" title="' + (isBlkCollapsed ? 'إظهار الفقرة' : 'طي الفقرة') + '">' +
+                '<span>' + (isBlkCollapsed ? 'إظهار' : 'إخفاء') + '</span>' + svgIcon('chevron-down') +
+              '</button>' +
+              '<button type="button" class="mini-ic-btn" data-cact="blk-up" data-b="' + bIdx + '" title="تحريك الفقرة للأعلى"' + (bIdx === 0 || draft.saving ? ' disabled' : '') + '>' + svgIcon('chevron-up') + '</button>' +
               '<button type="button" class="mini-ic-btn" data-cact="blk-down" data-b="' + bIdx + '" title="تحريك الفقرة للأسفل"' + (bIdx === draft.blocks.length - 1 || draft.saving ? ' disabled' : '') + '>' + svgIcon('chevron-down') + '</button>' +
               '<button type="button" class="mini-ic-btn danger" data-cact="blk-del" data-b="' + bIdx + '" title="حذف هذه الفقرة"' + (draft.saving ? ' disabled' : '') + '>' + svgIcon('trash') + '</button>'
             : '') +
         '</div>' +
       '</div>' +
 
-      '<div class="frm-row">' +
-        '<input class="inp" data-c-title="' + bIdx + '" value="' + escapeHtml(blk.title) + '" placeholder="' + escapeHtml(cfg.titlePlaceholder) + '"' + (draft.saving ? ' disabled' : '') + '>' +
-        (kind === 'exercise'
-          ? '<select class="inp" data-c-extype="' + bIdx + '" style="max-width:230px"' + (draft.saving ? ' disabled' : '') + '>' +
-              '<option value="image"' + (blk.exerciseType === 'image' ? ' selected' : '') + '>تمرين صور (صورة أو عدة صور)</option>' +
-              '<option value="pdf"' + (blk.exerciseType === 'pdf' ? ' selected' : '') + '>تمرين PDF (ملف أو عدة ملفات)</option>' +
-              '<option value="video"' + (blk.exerciseType === 'video' ? ' selected' : '') + '>تمرين فيديو (فيديو أو عدة أجزاء)</option>' +
-              '<option value="link"' + (blk.exerciseType === 'link' ? ' selected' : '') + '>رابط تطبيقي خارجي</option>' +
-            '</select>'
-          : '') +
-        '<label class="btn file-label' + (draft.saving ? ' muted' : '') + '">' +
-          svgIcon('upload') + ' ' + cfg.uploadBtnLabel +
-          (blk.files.length ? ' (' + blk.files.length + ')' : '') +
-          '<input type="file" multiple accept="' + cfg.accept + '" data-c-pick="' + bIdx + '"' + (draft.saving ? ' disabled' : '') + '>' +
-        '</label>' +
-      '</div>' +
+      '<div class="dyn-block-body"' + (isBlkCollapsed ? ' hidden' : '') + '>' +
+        '<div class="frm-row">' +
+          '<input class="inp" data-c-title="' + bIdx + '" value="' + escapeHtml(blk.title) + '" placeholder="' + escapeHtml(cfg.titlePlaceholder) + '"' + (draft.saving ? ' disabled' : '') + '>' +
+          (kind === 'exercise'
+            ? '<select class="inp" data-c-extype="' + bIdx + '" style="max-width:230px"' + (draft.saving ? ' disabled' : '') + '>' +
+                '<option value="image"' + (blk.exerciseType === 'image' ? ' selected' : '') + '>تمرين صور (صورة أو عدة صور)</option>' +
+                '<option value="pdf"' + (blk.exerciseType === 'pdf' ? ' selected' : '') + '>تمرين PDF (ملف أو عدة ملفات)</option>' +
+                '<option value="video"' + (blk.exerciseType === 'video' ? ' selected' : '') + '>تمرين فيديو (فيديو أو عدة أجزاء)</option>' +
+                '<option value="link"' + (blk.exerciseType === 'link' ? ' selected' : '') + '>رابط تطبيقي خارجي</option>' +
+              '</select>'
+            : '') +
+          '<label class="btn file-label' + (draft.saving ? ' muted' : '') + '">' +
+            svgIcon('upload') + ' ' + cfg.uploadBtnLabel +
+            (blk.files.length ? ' (' + blk.files.length + ')' : '') +
+            '<input type="file" multiple accept="' + cfg.accept + '" data-c-pick="' + bIdx + '"' + (draft.saving ? ' disabled' : '') + '>' +
+          '</label>' +
+        '</div>' +
 
-      filesStripHTML +
-      '<div class="dyn-urls-wrap">' + urlsHTML + '</div>' +
+        filesStripHTML +
+        '<div class="dyn-urls-wrap">' + urlsHTML + '</div>' +
+      '</div>' +
     '</div>';
   }).join('');
 
@@ -2253,14 +2339,21 @@ function renderDynamicComposer(mount, area, lesson, kind, cfg, opts) {
     var b = +btn.dataset.b, f = +btn.dataset.f, u = +btn.dataset.u;
 
     if (act === 'blk-add') {
-      draft.blocks.push(makeComposerBlock(kind));
+      draft.blocks.forEach(function (prevBlk) { prevBlk.collapsed = true; });
+      var freshBlk = makeComposerBlock(kind);
+      freshBlk.collapsed = false;
+      draft.blocks.push(freshBlk);
       renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
       var titleInputs = $all('[data-c-title]', mount);
       if (titleInputs.length) titleInputs[titleInputs.length - 1].focus();
+    } else if (act === 'blk-toggle' && draft.blocks[b]) {
+      draft.blocks[b].collapsed = !draft.blocks[b].collapsed;
+      renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
     } else if (act === 'blk-del' && draft.blocks[b]) {
       revokeDraftBlockPreviews(draft.blocks[b]);
       draft.blocks.splice(b, 1);
       if (!draft.blocks.length) draft.blocks.push(makeComposerBlock(kind));
+      if (draft.blocks.length === 1) draft.blocks[0].collapsed = false;
       renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
     } else if (act === 'blk-up' && b > 0) {
       var tmpB = draft.blocks[b - 1];

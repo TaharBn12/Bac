@@ -299,13 +299,23 @@ function setItemCompleted(itemId, completed) {
   if (!itemId) return false;
   var map = getCompletedMap();
   if (completed) {
-    map[itemId] = { completedAt: new Date().toISOString() };
+    var entry = { completedAt: new Date().toISOString() };
+    map[itemId] = entry;
+    if (window.CLOUD_COMPLETED && typeof window.CLOUD_COMPLETED === 'object') {
+      window.CLOUD_COMPLETED[itemId] = entry;
+    }
   } else {
     delete map[itemId];
+    if (window.CLOUD_COMPLETED && typeof window.CLOUD_COMPLETED === 'object') {
+      delete window.CLOUD_COMPLETED[itemId];
+    }
   }
   try {
     localStorage.setItem(COMPLETED_STORE_KEY, JSON.stringify(map));
   } catch (e) { /* تجاهل */ }
+  if (typeof Cloud !== 'undefined' && Cloud && Cloud.mode === 'cloud' && typeof Cloud.syncCompletedItem === 'function') {
+    Cloud.syncCompletedItem(itemId, !!completed);
+  }
   try {
     window.dispatchEvent(new CustomEvent('aya:completion-changed', {
       detail: { itemId: itemId, completed: !!completed }
