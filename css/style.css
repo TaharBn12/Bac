@@ -1198,6 +1198,40 @@ select.inp option[value=''] { color: var(--muted); }
 .ex-inline-group .img-gallery {
   grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
 }
+.ex-inline-group .img-thumb {
+  background: rgba(7, 9, 26, 0.55);
+}
+.ex-inline-group .img-thumb img {
+  object-fit: contain;
+}
+.img-view-stack .ex-inline-group .img-gallery,
+.ex-btns.img-view-stack .img-gallery {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px; max-width: 840px; margin-inline: auto;
+}
+
+.sec-head-row {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; flex-wrap: wrap;
+}
+.res-kind-pills {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: 12px 0 6px; padding: 6px; border-radius: 13px;
+  background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border);
+}
+.res-kind-pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 35px; padding: 0 13px; border-radius: 10px;
+  border: 1px solid transparent; background: transparent;
+  color: var(--muted); font-family: inherit; font-size: 13px; font-weight: 800;
+  cursor: pointer; transition: 0.16s;
+}
+.res-kind-pill .ic { width: 15px; height: 15px; }
+.res-kind-pill:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+.res-kind-pill.active {
+  background: rgba(245, 197, 66, 0.16); border-color: rgba(245, 197, 66, 0.45);
+  color: var(--accent);
+}
 
 /* ============ منشئ الفقرات الديناميكي وإدارة المجموعات في لوحة التحكم ============ */
 .admin-res-sec { margin-top: 6px; }

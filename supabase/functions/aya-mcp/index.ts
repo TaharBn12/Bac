@@ -1502,13 +1502,15 @@ const MCP_TOOLS = [
   },
   {
     name: "copy_resource_to_unit_lessons",
-    description: "نسخ مورد موجود (أو مجموعة كاملة بعنوانها وجميع صورها/ملفاتها عبر group_id) إلى جميع الدروس داخل نفس الوحدة دفعة واحدة.",
+    description: "نسخ مورد موجود، أو مجموعة كاملة (group_id)، أو تمرين مستقل كامل من صفحة التمارين (exercise_id)، أو مزامنة جميع تمارين الوحدة المستقلة (sync_unit_exercises=true) إلى قسم التمارين والتطبيقات في جميع دروس الوحدة.",
     inputSchema: {
       type: "object",
       properties: {
         resource_id: { type: "string" },
         group_id: { type: "string" },
+        exercise_id: { type: "string", description: "معرف التمرين المستقل (ex-...) لنسخ جميع عناوينه وصوره وملفاته إلى دروس الوحدة" },
         unit_id: { type: "string" },
+        sync_unit_exercises: { type: "boolean", description: "عند true يتم نسخ ومزامنة كل تمارين الوحدة المستقلة بالترتيب إلى جميع دروس الوحدة" },
       },
     },
   },
@@ -1786,11 +1788,14 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
           const parentItem = d.lessons.find((l) => l.id === lessonId);
           if (parentItem) {
             const isRowEx = (l: LessonRow) => l.item_type === "exercise" || l.id.startsWith("ex-");
+            const parentIsEx = isRowEx(parentItem);
+            const targetKind = parentIsEx ? "exercise" : kind;
+            const targetExType = parentIsEx ? (kind === "exercise" ? (exType || "image") : kind) : exType;
             const siblingLessons = d.lessons.filter(
               (l) => l.unit_id === parentItem.unit_id && l.id !== lessonId && !isRowEx(l),
             );
             for (const sib of siblingLessons) {
-              const sibRes = d.resources.filter((r) => r.lesson_id === sib.id && r.kind === kind);
+              const sibRes = d.resources.filter((r) => r.lesson_id === sib.id && r.kind === targetKind);
               let sibMax = sibRes.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
               const sibGroupId = uid("g");
               let sibAdded = false;
@@ -1800,11 +1805,11 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
                 rowsToSave.push({
                   id: uid("r"),
                   lesson_id: sib.id,
-                  kind,
+                  kind: targetKind,
                   title: pr.title,
                   url: pr.url,
                   size: null,
-                  exercise_type: pr.exercise_type,
+                  exercise_type: targetExType,
                   group_id: sibGroupId,
                   group_title: groupTitle,
                   sort_order: sibMax,
@@ -1853,20 +1858,54 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
     case "copy_resource_to_unit_lessons": {
       const resourceId = String(args?.resource_id || "").trim();
       const groupIdArg = String(args?.group_id || "").trim();
-      if (!resourceId && !groupIdArg) {
-        throw new Error("معرف المورد (resource_id) أو معرف المجموعة (group_id) مطلوب.");
-      }
+      const exerciseIdArg = String(args?.exercise_id || "").trim();
+      const syncUnitEx = Boolean(args?.sync_unit_exercises);
       const d = await dbSelectAll();
-      const bundle: ResourceRow[] = groupIdArg
-        ? d.resources.filter((r) => r.group_id === groupIdArg)
-        : d.resources.filter((r) => r.id === resourceId);
-      if (!bundle.length) throw new Error("لم يتم العثور على المورد أو المجموعة المطلوبة.");
+      const isRowEx = (l: LessonRow) => l.item_type === "exercise" || l.id.startsWith("ex-");
+
+      let bundle: ResourceRow[] = [];
+      let inferredUnitId = String(args?.unit_id || "").trim();
+
+      if (syncUnitEx) {
+        if (!inferredUnitId) throw new Error("معرف الوحدة (unit_id) مطلوب عند استخدام sync_unit_exercises.");
+        const unitExs = d.lessons
+          .filter((l) => l.unit_id === inferredUnitId && isRowEx(l))
+          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+        for (const ex of unitExs) {
+          for (const k of ["image", "pdf", "video"]) {
+            const items = d.resources
+              .filter((r) => r.lesson_id === ex.id && r.kind === k)
+              .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+            bundle.push(...items);
+          }
+        }
+      } else if (exerciseIdArg) {
+        const exRow = d.lessons.find((l) => l.id === exerciseIdArg);
+        if (!exRow) throw new Error(`التمرين (${exerciseIdArg}) غير موجود.`);
+        if (!inferredUnitId) inferredUnitId = exRow.unit_id;
+        for (const k of ["image", "pdf", "video"]) {
+          const items = d.resources
+            .filter((r) => r.lesson_id === exRow.id && r.kind === k)
+            .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+          bundle.push(...items);
+        }
+      } else if (groupIdArg) {
+        bundle = d.resources
+          .filter((r) => r.group_id === groupIdArg)
+          .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+      } else if (resourceId) {
+        bundle = d.resources.filter((r) => r.id === resourceId);
+      } else {
+        throw new Error("أحد المعاملات (resource_id أو group_id أو exercise_id أو sync_unit_exercises) مطلوب.");
+      }
+
+      if (!bundle.length) throw new Error("لم يتم العثور على موارد لنسخها.");
 
       const firstSrc = bundle[0];
-      const parentLesson = d.lessons.find((l) => l.id === firstSrc.lesson_id);
-      const targetUnitId = String(args?.unit_id || parentLesson?.unit_id || "").trim();
+      const firstParent = d.lessons.find((l) => l.id === firstSrc.lesson_id);
+      const targetUnitId = inferredUnitId || firstParent?.unit_id || "";
       if (!targetUnitId) throw new Error("تعذّر تحديد الوحدة المستهدفة.");
-      const isRowEx = (l: LessonRow) => l.item_type === "exercise" || l.id.startsWith("ex-");
+
       const targetLessons = d.lessons.filter(
         (l) => l.unit_id === targetUnitId && l.id !== firstSrc.lesson_id && !isRowEx(l),
       );
@@ -1874,27 +1913,39 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
       let copiedLessons = 0;
       let skipped = 0;
       for (const tl of targetLessons) {
-        const existing = d.resources.filter((r) => r.lesson_id === tl.id && r.kind === firstSrc.kind);
-        let maxOrd = existing.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
-        const newGid = firstSrc.group_id ? uid("g") : null;
+        const groupMap = new Map<string, string>();
         let lessonTouched = false;
         for (const src of bundle) {
+          const srcParent = d.lessons.find((l) => l.id === src.lesson_id);
+          const fromEx = srcParent ? isRowEx(srcParent) : false;
+          const mappedKind = fromEx ? "exercise" : src.kind;
+          const mappedExType = fromEx
+            ? (src.kind === "exercise" ? (src.exercise_type || "image") : src.kind)
+            : src.exercise_type;
+
+          const existing = [
+            ...d.resources.filter((r) => r.lesson_id === tl.id && r.kind === mappedKind),
+            ...toInsert.filter((r) => r.lesson_id === tl.id && r.kind === mappedKind),
+          ];
           if (existing.some((r) => r.url === src.url)) {
             skipped++;
             continue;
           }
-          maxOrd += 1;
+          const maxOrd = existing.reduce((m, r) => Math.max(m, r.sort_order || 0), 0);
+          const srcGKey = src.group_id || `single-${src.id}`;
+          if (!groupMap.has(srcGKey)) groupMap.set(srcGKey, uid("g"));
+
           toInsert.push({
             id: uid("r"),
             lesson_id: tl.id,
-            kind: src.kind,
+            kind: mappedKind,
             title: src.title,
             url: src.url,
             size: src.size,
-            exercise_type: src.exercise_type,
-            group_id: newGid,
-            group_title: src.group_title ?? null,
-            sort_order: maxOrd,
+            exercise_type: mappedExType,
+            group_id: groupMap.get(srcGKey) || null,
+            group_title: src.group_title ?? src.title ?? null,
+            sort_order: maxOrd + 1,
           });
           lessonTouched = true;
         }
@@ -2143,10 +2194,10 @@ async function handleSingleJsonRpc(
           },
           serverInfo: {
             name: "aya-bac-2027",
-            version: "1.2.0",
+            version: "1.2.1",
           },
           instructions:
-            "خادم إدارة منصة «آية باك 2027» التعليمية. يدعم الدروس وتمارين الوحدات المستقلة والمجموعات الديناميكية للموارد (عنوان + عدة صور/فيديوهات/ملفات PDF عبر مصفوفة urls في manage_resource).",
+            "خادم إدارة منصة «آية باك 2027» التعليمية. يدعم الدروس وتمارين الوحدات المستقلة والمجموعات الديناميكية للموارد (عنوان + عدة صور/فيديوهات/ملفات PDF عبر مصفوفة urls في manage_resource) ونسخ ومزامنة صفحة التمارين إلى دروس الوحدة.",
         },
       };
     }
@@ -2332,7 +2383,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonResponse({
         ok: true,
         service: "aya-bac-2027-mcp",
-        version: "1.2.0",
+        version: "1.2.1",
         authenticated_key_present: Boolean(adminKey),
         tools_count: MCP_TOOLS.length,
         message: "خادم الذكاء الاصطناعي و Claude MCP لمنصة آية باك 2027 جاهز للاتصال.",
