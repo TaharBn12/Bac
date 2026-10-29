@@ -3,6 +3,9 @@
    ============================================================ */
 'use strict';
 
+/* تفعيل وضع الإدارة لكي تعرض دوال الجلب كل العناصر بما فيها المخفية عن الطلاب */
+window.AYA_ADMIN_MODE = true;
+
 var SUBJECT_COLORS = ['indigo', 'teal', 'green', 'amber', 'purple', 'blue', 'sky', 'rose', 'emerald', 'orange', 'cyan', 'lime', 'pink', 'violet', 'slate'];
 var COLOR_LABELS = {
   indigo: 'نيلي', teal: 'تركوازي', green: 'أخضر', amber: 'كهرماني', purple: 'أرجواني',
@@ -19,6 +22,9 @@ var KIND_META = {
 var data, currentTab = 'subjects';
 var sel = { subject: '', unit: '', lesson: '', exercise: '' };
 var pickedFiles = {}; /* ملفات مختارة مؤقتاً في نماذج الإضافة: pickedFiles[key] = File */
+var adminOpenSections = {}; /* حفظ الأقسام المفتوحة لكل درس/تمرين (الأول مفتوح افتراضياً والبقية مطوية بسهم) */
+var adminOpenGroups = {};   /* حفظ المجموعات المفتوحة (المجموعة الأولى مفتوحة افتراضياً والبقية مطوية بسهم) */
+var adminOpenUnits = {};    /* حفظ الوحدات المفتوحة في لوحة الوحدات (الوحدة الأولى مفتوحة افتراضياً) */
 
 function initAdmin() {
   hydrateIcons();
@@ -242,6 +248,16 @@ function unitExerciseOptions(unitId, selectedId) {
   }).join('');
 }
 
+function hiddenPillHTML(isHidden) {
+  return isHidden ? ' <span class="hidden-pill">' + svgIcon('eye-off') + ' مخفي عن الطلاب</span>' : '';
+}
+
+function hideBtnHTML(id, isHidden, titleShown, titleHidden) {
+  return '<button class="icon-btn' + (isHidden ? ' is-hidden-btn' : '') + '" data-act="toggle-hide" data-id="' + id + '" title="' +
+    escapeHtml(isHidden ? (titleHidden || 'إظهار للطلاب') : (titleShown || 'إخفاء مؤقتاً عن الطلاب')) + '">' +
+    svgIcon(isHidden ? 'eye-off' : 'eye') + '</button>';
+}
+
 function actsHTML(id, extra) {
   return '<div class="item-acts">' +
     (extra || '') +
@@ -252,7 +268,7 @@ function actsHTML(id, extra) {
   '</div>';
 }
 
-/* التقاط أزرار القوائم (تعديل/حذف/ترتيب/نسخ) بشكل مركزي */
+/* التقاط أزرار القوائم (تعديل/حذف/ترتيب/نسخ/إخفاء/توسيع) بشكل مركزي */
 function bindList(container, handlers) {
   if (!container) return;
   container.addEventListener('click', function (e) {
@@ -266,6 +282,11 @@ function bindList(container, handlers) {
     else if (act === 'copy' && handlers.copy) handlers.copy(id);
     else if (act === 'copy-all-unit' && handlers.copyAllUnit) handlers.copyAllUnit(id);
     else if (act === 'copy-to-lessons' && handlers.copyToLessons) handlers.copyToLessons(id);
+    else if (act === 'unit-manage' && handlers.unitManage) handlers.unitManage(id);
+    else if (act === 'toggle-hide' && handlers.toggleHide) handlers.toggleHide(id);
+    else if (act === 'toggle-open' && handlers.toggleOpen) handlers.toggleOpen(id);
+    else if (act === 'coeff-inc' && handlers.coeffInc) handlers.coeffInc(id);
+    else if (act === 'coeff-dec' && handlers.coeffDec) handlers.coeffDec(id);
     else if (act === 'view' && handlers.view) handlers.view(id);
     else if (act === 'goto' && handlers.goto) handlers.goto(id);
     else if (act === 'select' && handlers.select) handlers.select(id);
@@ -601,6 +622,228 @@ function syncStandaloneExercisesToUnitLessons(unitId, specificExerciseId) {
   return { lessonsCount: targetLessons.length, itemsCount: sourceItems.length, updatedCount: res.targetsUpdated };
 }
 
+/* البحث عن كل النسخ المطابقة لمجموعة موارد أو تمرين داخل جميع دروس الوحدة */
+function findMatchingResourcesAcrossUnitLessons(unitId, seedItems, groupTitle) {
+  var unitLessonIds = {};
+  lessonsOf(data, unitId, true).forEach(function (l) { unitLessonIds[l.id] = true; });
+  var urlSet = {};
+  (seedItems || []).forEach(function (it) { if (it && it.url) urlSet[it.url] = true; });
+  var cleanTitle = String(groupTitle || '').trim();
+
+  var matchedResources = data.resources.filter(function (r) {
+    if (!unitLessonIds[r.lessonId]) return false;
+    if (r.url && urlSet[r.url]) return true;
+    if (cleanTitle && r.kind === 'exercise' && String(r.groupTitle || r.title || '').trim() === cleanTitle) return true;
+    return false;
+  });
+
+  var touchedLessons = {};
+  matchedResources.forEach(function (r) { touchedLessons[r.lessonId] = true; });
+  return {
+    resources: matchedResources,
+    lessonsCount: Object.keys(touchedLessons).length
+  };
+}
+
+/* إزالة نسخ تمرين مستقل من جميع دروس الوحدة (مع الإبقاء عليه داخل صفحة التمارين إن رغب المدير) */
+function removeStandaloneExerciseFromUnitLessons(exId) {
+  var ex = getLesson(data, exId);
+  if (!ex) return { removedResources: 0, lessonsCount: 0 };
+  var exItems = resourcesOf(data, exId, null, true);
+  var found = findMatchingResourcesAcrossUnitLessons(ex.unitId, exItems, ex.title);
+  if (!found.resources.length) return { removedResources: 0, lessonsCount: 0 };
+
+  var idSet = {};
+  var urlsToCheck = [];
+  found.resources.forEach(function (r) {
+    idSet[r.id] = true;
+    if (r.url && urlsToCheck.indexOf(r.url) === -1) urlsToCheck.push(r.url);
+  });
+  data.resources = data.resources.filter(function (r) { return !idSet[r.id]; });
+  lessonsOf(data, ex.unitId, true).forEach(function (l) {
+    normalizeOrders(resourcesOf(data, l.id, 'exercise', true));
+  });
+  urlsToCheck.forEach(releaseFileIfUnused);
+  save();
+  return { removedResources: found.resources.length, lessonsCount: found.lessonsCount };
+}
+
+/* إخفاء أو إظهار نسخ تمرين مستقل داخل جميع دروس الوحدة دفعة واحدة */
+function setStandaloneExerciseHiddenInUnitLessons(exId, hideFlag) {
+  var ex = getLesson(data, exId);
+  if (!ex) return { count: 0, lessonsCount: 0 };
+  var exItems = resourcesOf(data, exId, null, true);
+  var found = findMatchingResourcesAcrossUnitLessons(ex.unitId, exItems, ex.title);
+  found.resources.forEach(function (r) { r.hidden = !!hideFlag; });
+  if (found.resources.length) save();
+  return { count: found.resources.length, lessonsCount: found.lessonsCount };
+}
+
+/* نافذة إدارة شاملة لتمرين في كل الدروس (إخفاء / إظهار / إزالة من كل الدروس / حذف نهائي) */
+function openUnitExerciseManageDialog(exId) {
+  var ex = getLesson(data, exId);
+  if (!ex) return;
+  var old = document.querySelector('.modal-overlay');
+  if (old) old.remove();
+
+  var exItems = resourcesOf(data, exId, null, true);
+  var matchInfo = findMatchingResourcesAcrossUnitLessons(ex.unitId, exItems, ex.title);
+  var hiddenInLessons = matchInfo.resources.length > 0 && matchInfo.resources.every(function (r) { return !!r.hidden; });
+
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML =
+    '<div class="modal" role="dialog" aria-modal="true" style="max-width:540px">' +
+      '<h3>' + svgIcon('sliders') + ' إدارة التمرين: «' + escapeHtml(ex.title) + '»</h3>' +
+      '<p class="hint" style="margin-top:-4px">تحكّم في ظهور هذا التمرين أو إزالته سواء في <b>صفحة التمارين</b> أو في <b>جميع دروس الوحدة</b> دفعة واحدة (' +
+        (matchInfo.lessonsCount ? 'موجود حالياً في <b>' + matchInfo.lessonsCount + ' درس</b>' : 'غير منسوخ للدروس حالياً') + ').</p>' +
+      '<div class="manage-choice-stack">' +
+        '<button type="button" class="manage-choice-btn" data-mact="toggle-ex-page">' +
+          '<span class="mc-ico">' + svgIcon(ex.hidden ? 'eye' : 'eye-off') + '</span>' +
+          '<span class="mc-body"><strong>' + (ex.hidden ? 'إظهار التمرين في صفحة التمارين' : 'إخفاء التمرين مؤقتاً من صفحة التمارين') + '</strong>' +
+          '<small>' + (ex.hidden ? 'التمرين مخفي حالياً عن الطلاب في قسم تمارين الوحدة' : 'يختفي عن الطلاب دون حذف ملفاته ويمكنك إظهاره لاحقاً') + '</small></span>' +
+        '</button>' +
+        (matchInfo.resources.length
+          ? '<button type="button" class="manage-choice-btn" data-mact="toggle-in-lessons">' +
+              '<span class="mc-ico">' + svgIcon(hiddenInLessons ? 'eye' : 'eye-off') + '</span>' +
+              '<span class="mc-body"><strong>' + (hiddenInLessons ? 'إظهار التمرين في جميع دروس الوحدة (' + matchInfo.lessonsCount + ' درس)' : 'إخفاء التمرين من جميع دروس الوحدة (' + matchInfo.lessonsCount + ' درس)') + '</strong>' +
+              '<small>تبديل الظهور داخل قسم «تمارين وتطبيقات» في كل الدروس دفعة واحدة</small></span>' +
+            '</button>' +
+            '<button type="button" class="manage-choice-btn warn" data-mact="remove-from-lessons">' +
+              '<span class="mc-ico">' + svgIcon('trash') + '</span>' +
+              '<span class="mc-body"><strong>إزالة هذا التمرين من كل دروس الوحدة فقط (' + matchInfo.lessonsCount + ' درس)</strong>' +
+              '<small>يحذف النسخ الموجودة داخل الدروس مع الإبقاء على التمرين محفوظاً في صفحة التمارين</small></span>' +
+            '</button>'
+          : '') +
+        '<button type="button" class="manage-choice-btn danger" data-mact="delete-everywhere">' +
+          '<span class="mc-ico">' + svgIcon('trash') + '</span>' +
+          '<span class="mc-body"><strong>حذف التمرين نهائياً (من صفحة التمارين + من كل الدروس)</strong>' +
+          '<small>يحذف التمرين وجميع صوره وملفاته من الوحدة بالكامل</small></span>' +
+        '</button>' +
+      '</div>' +
+      '<div class="acts" style="margin-top:14px">' +
+        '<button type="button" class="btn" data-close>' + svgIcon('x') + ' إغلاق</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+  function close() { overlay.remove(); }
+  overlay.querySelector('[data-close]').addEventListener('click', close);
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+
+  overlay.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-mact]');
+    if (!b) return;
+    var act = b.dataset.mact;
+    if (act === 'toggle-ex-page') {
+      ex.hidden = !ex.hidden;
+      save(); close(); renderPanel();
+      toast(ex.hidden ? 'تم إخفاء التمرين عن الطلاب في صفحة التمارين' : 'تم إظهار التمرين للطلاب');
+    } else if (act === 'toggle-in-lessons') {
+      var resH = setStandaloneExerciseHiddenInUnitLessons(ex.id, !hiddenInLessons);
+      close(); renderPanel();
+      toast((!hiddenInLessons ? 'تم إخفاء التمرين في ' : 'تم إظهار التمرين في ') + resH.lessonsCount + ' درس بالوحدة');
+    } else if (act === 'remove-from-lessons') {
+      if (!confirm('تأكيد إزالة تمرين «' + ex.title + '» من جميع دروس الوحدة (' + matchInfo.lessonsCount + ' درس) مع بقائه في صفحة التمارين؟')) return;
+      var rem = removeStandaloneExerciseFromUnitLessons(ex.id);
+      close(); renderPanel();
+      toast('تمت إزالة التمرين من ' + rem.lessonsCount + ' درس في الوحدة', 'info');
+    } else if (act === 'delete-everywhere') {
+      if (!confirm('حذف التمرين «' + ex.title + '» نهائياً من صفحة التمارين ومن جميع دروس الوحدة؟')) return;
+      removeStandaloneExerciseFromUnitLessons(ex.id);
+      deleteCascade('lesson', ex.id);
+      if (sel.exercise === ex.id) sel.exercise = '';
+      close(); renderPanel();
+      toast('تم حذف التمرين نهائياً من الوحدة وكل دروسها', 'info');
+    }
+  });
+}
+
+/* نافذة إدارة فقرة/مجموعة محددة عبر كل دروس الوحدة (إخفاء / إظهار / إزالة من كل الدروس) */
+function openGroupUnitManageDialog(targetGroup, currentLesson, kind, area, opts) {
+  if (!targetGroup || !currentLesson) return;
+  var old = document.querySelector('.modal-overlay');
+  if (old) old.remove();
+
+  var gTitle = targetGroup.title || KIND_META[kind].label;
+  var matchInfo = findMatchingResourcesAcrossUnitLessons(currentLesson.unitId, targetGroup.items, gTitle);
+  var allGroupHiddenLocal = targetGroup.allHidden;
+  var allHiddenUnitWide = matchInfo.resources.length > 0 && matchInfo.resources.every(function (r) { return !!r.hidden; });
+
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML =
+    '<div class="modal" role="dialog" aria-modal="true" style="max-width:540px">' +
+      '<h3>' + svgIcon('sliders') + ' خيارات الإخفاء والحذف: «' + escapeHtml(gTitle) + '»</h3>' +
+      '<p class="hint" style="margin-top:-4px">تحكّم في هذه الفقرة داخل العنصر الحالي أو عبر <b>جميع دروس الوحدة</b> دفعة واحدة (' +
+        (matchInfo.lessonsCount ? 'موجودة في <b>' + matchInfo.lessonsCount + ' درس</b> بالوحدة' : 'موجودة في هذا الموضع فقط') + ').</p>' +
+      '<div class="manage-choice-stack">' +
+        '<button type="button" class="manage-choice-btn" data-gmact="toggle-local">' +
+          '<span class="mc-ico">' + svgIcon(allGroupHiddenLocal ? 'eye' : 'eye-off') + '</span>' +
+          '<span class="mc-body"><strong>' + (allGroupHiddenLocal ? 'إظهار هذا العنوان في هذه الصفحة' : 'إخفاء هذا العنوان مؤقتاً في هذه الصفحة') + '</strong>' +
+          '<small>يخفي أو يظهر «' + escapeHtml(gTitle) + '» هنا فقط دون المساس ببقية الدروس</small></span>' +
+        '</button>' +
+        (matchInfo.resources.length > 0
+          ? '<button type="button" class="manage-choice-btn" data-gmact="toggle-unit">' +
+              '<span class="mc-ico">' + svgIcon(allHiddenUnitWide ? 'eye' : 'eye-off') + '</span>' +
+              '<span class="mc-body"><strong>' + (allHiddenUnitWide ? 'إظهار «' + escapeHtml(gTitle) + '» في كل دروس الوحدة (' + matchInfo.lessonsCount + ' درس)' : 'إخفاء «' + escapeHtml(gTitle) + '» من كل دروس الوحدة (' + matchInfo.lessonsCount + ' درس)') + '</strong>' +
+              '<small>تطبيق الإخفاء أو الإظهار على جميع الدروس في الوحدة بنقرة واحدة</small></span>' +
+            '</button>' +
+            '<button type="button" class="manage-choice-btn danger" data-gmact="delete-unit">' +
+              '<span class="mc-ico">' + svgIcon('trash') + '</span>' +
+              '<span class="mc-body"><strong>إزالة وحذف «' + escapeHtml(gTitle) + '» من جميع دروس الوحدة (' + matchInfo.lessonsCount + ' درس)</strong>' +
+              '<small>يحذف هذه الفقرة من قسم التمارين/المحتوى في كل دروس الوحدة دفعة واحدة' +
+                (isExerciseItem(currentLesson) ? ' (مع بقائها في صفحة التمرين الحالية)' : '') + '</small></span>' +
+            '</button>'
+          : '') +
+      '</div>' +
+      '<div class="acts" style="margin-top:14px">' +
+        '<button type="button" class="btn" data-close>' + svgIcon('x') + ' إغلاق</button>' +
+      '</div>' +
+    '</div>';
+
+  document.body.appendChild(overlay);
+  function close() { overlay.remove(); }
+  overlay.querySelector('[data-close]').addEventListener('click', close);
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+
+  overlay.addEventListener('click', function (e) {
+    var b = e.target.closest('[data-gmact]');
+    if (!b) return;
+    var act = b.dataset.gmact;
+    if (act === 'toggle-local') {
+      var nextH = !allGroupHiddenLocal;
+      targetGroup.items.forEach(function (it) { it.hidden = nextH; });
+      save(); close();
+      renderResourceSections(area, currentLesson, opts);
+      toast(nextH ? 'تم إخفاء الفقرة عن الطلاب' : 'تم إظهار الفقرة للطلاب');
+    } else if (act === 'toggle-unit') {
+      var nextUH = !allHiddenUnitWide;
+      matchInfo.resources.forEach(function (r) { r.hidden = nextUH; });
+      save(); close();
+      renderResourceSections(area, currentLesson, opts);
+      toast((nextUH ? 'تم إخفاء الفقرة في ' : 'تم إظهار الفقرة في ') + matchInfo.lessonsCount + ' درس بالوحدة');
+    } else if (act === 'delete-unit') {
+      if (!confirm('حذف «' + gTitle + '» من جميع دروس الوحدة (' + matchInfo.lessonsCount + ' درس)؟')) return;
+      var rmIds = {};
+      var urlsCheck = [];
+      matchInfo.resources.forEach(function (r) {
+        rmIds[r.id] = true;
+        if (r.url && urlsCheck.indexOf(r.url) === -1) urlsCheck.push(r.url);
+      });
+      data.resources = data.resources.filter(function (r) { return !rmIds[r.id]; });
+      lessonsOf(data, currentLesson.unitId, true).forEach(function (l) {
+        normalizeOrders(resourcesOf(data, l.id, 'exercise', true));
+        normalizeOrders(resourcesOf(data, l.id, kind, true));
+      });
+      urlsCheck.forEach(releaseFileIfUnused);
+      save(); close();
+      renderResourceSections(area, currentLesson, opts);
+      toast('تمت إزالة «' + gTitle + '» من ' + matchInfo.lessonsCount + ' درس في الوحدة', 'info');
+    }
+  });
+}
+
 function copySingleResourceToTargets(resource, targets) {
   var r = copyResourcesBundleToTargets([resource], targets);
   return { added: r.targetsUpdated, skipped: r.skipped };
@@ -748,6 +991,7 @@ function openCreatePathDialog() {
     title: 'بناء مسار تعليمي جديد', icon: 'sparkles',
     fields: [
       { key: 'subject', label: 'اسم المادة', placeholder: 'مثال: الإعلام الآلي' },
+      { key: 'coefficient', label: 'معامل المادة في البكالوريا (لتوزيع حصص استعمال الزمن)', type: 'number', value: 2 },
       { key: 'icon', label: 'أيقونة المادة — اسم SVG أو رابط صورة (اختياري)', type: 'icon', value: 'book', placeholder: 'مثال: book أو https://...' },
       { key: 'color', label: 'لون المادة', type: 'select', value: 'indigo', options: colorOptions() },
       { key: 'unit', label: 'عنوان الوحدة الأولى', placeholder: 'مثال: البرمجة' },
@@ -760,8 +1004,10 @@ function openCreatePathDialog() {
         return;
       }
       var subjectId = uid('s'), unitId = uid('u'), lessonId = uid('l');
+      var coeffVal = Math.max(1, Math.min(20, parseInt(v.coefficient, 10) || defaultSubjectCoefficient(subjectName)));
       data.subjects.push({
         id: subjectId, name: subjectName, icon: v.icon.trim() || 'book', color: v.color || 'indigo',
+        coefficient: coeffVal,
         order: data.subjects.length + 1
       });
       data.units.push({ id: unitId, subjectId: subjectId, title: unitTitle, order: 1 });
@@ -771,14 +1017,16 @@ function openCreatePathDialog() {
   });
 }
 
-function treeUnitHTML(unit) {
+function treeUnitHTML(unit, uIdx) {
   var lessons = lessonsOf(data, unit.id);
   var exercises = unitExercisesOf(data, unit.id);
   var allTitles = lessons.concat(exercises).map(function (l) { return l.title; }).join(' ');
   var unitSearch = (unit.title + ' ' + allTitles).toLocaleLowerCase();
-  return '<details class="tree-unit" open data-search="' + escapeHtml(unitSearch) + '">' +
-    '<summary><span class="tree-label"><span class="tree-dot"></span>' + escapeHtml(unit.title) + '</span>' +
-      '<span class="tree-meta">' + lessons.length + ' درس · ' + exercises.length + ' تمرين</span></summary>' +
+  /* فتح الوحدة الأولى فقط والبقية مطوية بزر سهم للإظهار/الإخفاء */
+  var openAttr = uIdx === 0 ? ' open' : '';
+  return '<details class="tree-unit"' + openAttr + ' data-search="' + escapeHtml(unitSearch) + '">' +
+    '<summary><span class="tree-label"><span class="tree-dot"></span>' + escapeHtml(unit.title) + hiddenPillHTML(unit.hidden) + '</span>' +
+      '<span class="tree-meta">' + lessons.length + ' درس · ' + exercises.length + ' تمرين <span class="acc-chevron">' + svgIcon('chevron-down') + '</span></span></summary>' +
     '<div class="tree-node-body">' +
       '<div class="tree-actions">' +
         '<button type="button" class="tree-action" data-organizer-act="add-lesson" data-id="' + unit.id + '">' + svgIcon('plus') + ' إضافة درس</button>' +
@@ -791,7 +1039,7 @@ function treeUnitHTML(unit) {
           lessons.map(function (l) {
             var resources = resourcesOf(data, l.id).length;
             return '<article class="tree-lesson" data-search="' + escapeHtml(l.title.toLocaleLowerCase()) + '">' +
-              '<span class="tree-lesson-title">' + svgIcon('film') + ' ' + escapeHtml(l.title) +
+              '<span class="tree-lesson-title">' + svgIcon('film') + ' ' + escapeHtml(l.title) + hiddenPillHTML(l.hidden) +
                 '<span class="tree-meta">درس · ' + resources + ' محتوى</span></span>' +
               '<span class="tree-actions">' +
                 '<button type="button" class="tree-action" data-organizer-act="manage-lesson" data-id="' + l.id + '">' + svgIcon('plus') + ' المحتوى</button>' +
@@ -802,7 +1050,7 @@ function treeUnitHTML(unit) {
           exercises.map(function (ex) {
             var resources = resourcesOf(data, ex.id).length;
             return '<article class="tree-lesson tree-exercise" data-search="' + escapeHtml(ex.title.toLocaleLowerCase()) + '">' +
-              '<span class="tree-lesson-title">' + svgIcon('pencil') + ' ' + escapeHtml(ex.title) +
+              '<span class="tree-lesson-title">' + svgIcon('pencil') + ' ' + escapeHtml(ex.title) + hiddenPillHTML(ex.hidden) +
                 '<span class="tree-meta tree-meta-ex">تمرين · ' + resources + ' محتوى</span></span>' +
               '<span class="tree-actions">' +
                 '<button type="button" class="tree-action" data-organizer-act="manage-exercise" data-id="' + ex.id + '">' + svgIcon('plus') + ' ملفات التمرين</button>' +
@@ -816,16 +1064,20 @@ function treeUnitHTML(unit) {
   '</details>';
 }
 
-function treeSubjectHTML(subject) {
+function treeSubjectHTML(subject, sIdx) {
   var units = unitsOf(data, subject.id);
+  var coeff = getSubjectCoefficient(subject);
   var lessonsCount = units.reduce(function (sum, u) { return sum + lessonsOf(data, u.id).length; }, 0);
   var exercisesCount = units.reduce(function (sum, u) { return sum + unitExercisesOf(data, u.id).length; }, 0);
   var search = (subject.name + ' ' + units.map(function (u) {
     return u.title + ' ' + allUnitItemsOf(data, u.id).map(function (l) { return l.title; }).join(' ');
   }).join(' ')).toLocaleLowerCase();
-  return '<details class="tree-subject" open data-search="' + escapeHtml(search) + '">' +
-    '<summary><span class="tree-label tree-subject-label">' + iconHTML(subject.icon, 'book') + ' ' + escapeHtml(subject.name) + '</span>' +
-      '<span class="tree-meta">' + units.length + ' وحدة · ' + lessonsCount + ' درس · ' + exercisesCount + ' تمرين</span></summary>' +
+  /* فتح المادة الأولى فقط والبقية مقفولة بزر سهم للإظهار/الإخفاء */
+  var openAttr = sIdx === 0 ? ' open' : '';
+  return '<details class="tree-subject"' + openAttr + ' data-search="' + escapeHtml(search) + '">' +
+    '<summary><span class="tree-label tree-subject-label">' + iconHTML(subject.icon, 'book') + ' ' + escapeHtml(subject.name) +
+      ' <span class="coeff-pill">المعامل ' + coeff + '</span>' + hiddenPillHTML(subject.hidden) + '</span>' +
+      '<span class="tree-meta">' + units.length + ' وحدة · ' + lessonsCount + ' درس · ' + exercisesCount + ' تمرين <span class="acc-chevron">' + svgIcon('chevron-down') + '</span></span></summary>' +
     '<div class="tree-node-body">' +
       '<div class="tree-actions">' +
         '<button type="button" class="tree-action primary" data-organizer-act="add-unit" data-id="' + subject.id + '">' + svgIcon('plus') + ' إضافة وحدة</button>' +
@@ -929,12 +1181,19 @@ function renderSubjectsPanel(p) {
   var list = data.subjects.slice().sort(byOrder);
 
   p.innerHTML =
-    '<h2>' + svgIcon('book') + ' إدارة المواد</h2>' +
-    '<p class="hint">أضف مادة، وعدّل الاسم والأيقونة واللون وموضع العرض. استخدم «منظّم المحتوى» لبناء مسار كامل أو نسخ مادة بكل محتواها.</p>' +
+    '<div class="sec-head-row" style="margin-bottom:6px">' +
+      '<h2 style="margin:0">' + svgIcon('book') + ' إدارة المواد ومعاملاتها</h2>' +
+      '<a class="btn btn-sm" href="schedule.html" target="_blank">' + svgIcon('calendar') + ' فتح استعمال الزمن الدراسي</a>' +
+    '</div>' +
+    '<p class="hint">أضف مادة وحدّد <b>معاملها في البكالوريا</b> (يعتمد عليه الموقع تلقائياً لتكرار حصص المادة وتوزيع الدروس في استعمال الزمن الأسبوعي). يمكنك أيضاً إخفاء أي مادة مؤقتاً عن الطلاب.</p>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<input class="inp" id="nsName" placeholder="اسم المادة (مثال: الرياضيات)">' +
-        '<input class="inp" id="nsIcon" dir="ltr" placeholder="رابط صورة أو اسم أيقونة SVG (مثال: math)" style="flex:2 1 240px">' +
+        '<div class="coeff-inp-wrap" title="معامل المادة في البكالوريا">' +
+          '<label for="nsCoeff">المعامل</label>' +
+          '<input class="inp coeff-inp" id="nsCoeff" type="number" min="1" max="20" value="2">' +
+        '</div>' +
+        '<input class="inp" id="nsIcon" dir="ltr" placeholder="رابط صورة أو اسم أيقونة SVG (مثال: math)" style="flex:2 1 200px">' +
         '<div class="icon-preview" id="nsIconPreview">' + svgIcon('book') + '</div>' +
         '<select class="inp" id="nsColor">' + SUBJECT_COLORS.map(function (c) { return '<option>' + c + '</option>'; }).join('') + '</select>' +
         '<button class="btn btn-primary" id="nsAdd">' + svgIcon('plus') + ' إضافة مادة</button>' +
@@ -945,14 +1204,37 @@ function renderSubjectsPanel(p) {
         var units = unitsOf(data, s.id);
         var lCount = units.reduce(function (n, u) { return n + lessonsOf(data, u.id).length; }, 0);
         var exCount = units.reduce(function (n, u) { return n + unitExercisesOf(data, u.id).length; }, 0);
-        return '<div class="item-row c-' + (s.color || 'indigo') + '">' +
+        var coeff = getSubjectCoefficient(s);
+        return '<div class="item-row c-' + (s.color || 'indigo') + (s.hidden ? ' is-hidden-row' : '') + '">' +
           '<div class="item-ico">' + iconHTML(s.icon, 'book') + '</div>' +
-          '<div class="item-info"><div class="item-title">' + escapeHtml(s.name) + '</div>' +
-          '<div class="item-sub">' + units.length + ' وحدة · ' + lCount + ' درس · ' + exCount + ' تمرين</div></div>' +
-          actsHTML(s.id, '<button class="icon-btn" data-act="copy" data-id="' + s.id + '" title="نسخ المادة بكل محتواها">' + svgIcon('copy') + '</button>') +
+          '<div class="item-info">' +
+            '<div class="item-title">' + escapeHtml(s.name) +
+              ' <span class="coeff-pill">المعامل ' + coeff + '</span>' +
+              hiddenPillHTML(s.hidden) +
+            '</div>' +
+            '<div class="item-sub">' + units.length + ' وحدة · ' + lCount + ' درس · ' + exCount + ' تمرين</div>' +
+          '</div>' +
+          actsHTML(s.id,
+            '<div class="coeff-stepper" title="تعديل سريع لمعامل المادة">' +
+              '<button type="button" class="mini-ic-btn" data-act="coeff-dec" data-id="' + s.id + '" title="إنقاص المعامل">−</button>' +
+              '<span class="coeff-stepper-val">' + coeff + '</span>' +
+              '<button type="button" class="mini-ic-btn" data-act="coeff-inc" data-id="' + s.id + '" title="زيادة المعامل">+</button>' +
+            '</div>' +
+            hideBtnHTML(s.id, s.hidden, 'إخفاء المادة عن الطلاب', 'إظهار المادة للطلاب') +
+            '<button class="icon-btn" data-act="copy" data-id="' + s.id + '" title="نسخ المادة بكل محتواها">' + svgIcon('copy') + '</button>'
+          ) +
         '</div>';
       }).join('') : '<div class="empty">لا توجد مواد — أضف أول مادة أعلاه</div>') +
     '</div>';
+
+  /* اقتراح المعامل تلقائياً أثناء كتابة اسم المادة */
+  var coeffTouched = false;
+  $('#nsCoeff').addEventListener('input', function () { coeffTouched = true; });
+  $('#nsName').addEventListener('input', function () {
+    if (!coeffTouched && this.value.trim()) {
+      $('#nsCoeff').value = defaultSubjectCoefficient(this.value);
+    }
+  });
 
   /* معاينة مباشرة للأيقونة أثناء الكتابة */
   $('#nsIcon').addEventListener('input', function () {
@@ -962,33 +1244,56 @@ function renderSubjectsPanel(p) {
   $('#nsAdd').addEventListener('click', function () {
     var name = $('#nsName').value.trim();
     if (!name) { toast('اكتب اسم المادة', 'err'); return; }
+    var coeffVal = Math.max(1, Math.min(20, parseInt($('#nsCoeff').value, 10) || defaultSubjectCoefficient(name)));
     data.subjects.push({
       id: uid('s'), name: name,
       icon: $('#nsIcon').value.trim() || 'book', color: $('#nsColor').value,
+      coefficient: coeffVal,
       order: (data.subjects.reduce(function (m, s) { return Math.max(m, s.order || 0); }, 0) + 1)
     });
-    save(); renderPanel(); toast('تمت إضافة المادة');
+    save(); renderPanel(); toast('تمت إضافة المادة (المعامل: ' + coeffVal + ')');
   });
 
   bindList($('#subjList'), {
     up: function (id) { moveItem(data.subjects, id, -1); renderPanel(); },
     down: function (id) { moveItem(data.subjects, id, 1); renderPanel(); },
+    coeffInc: function (id) {
+      var s = getSubject(data, id);
+      if (!s) return;
+      s.coefficient = Math.min(20, getSubjectCoefficient(s) + 1);
+      save(); renderPanel(); toast('معامل «' + s.name + '» أصبح ' + s.coefficient);
+    },
+    coeffDec: function (id) {
+      var s = getSubject(data, id);
+      if (!s) return;
+      s.coefficient = Math.max(1, getSubjectCoefficient(s) - 1);
+      save(); renderPanel(); toast('معامل «' + s.name + '» أصبح ' + s.coefficient);
+    },
+    toggleHide: function (id) {
+      var s = getSubject(data, id);
+      if (!s) return;
+      s.hidden = !s.hidden;
+      save(); renderPanel();
+      toast(s.hidden ? 'تم إخفاء المادة عن الطلاب' : 'تم إظهار المادة للطلاب');
+    },
     rename: function (id) {
       var s = getSubject(data, id);
       openEditDialog({
-        title: 'تعديل المادة', icon: 'book',
+        title: 'تعديل المادة ومعاملها', icon: 'book',
         fields: [
           { key: 'name', label: 'اسم المادة', value: s.name, placeholder: 'مثال: الرياضيات' },
+          { key: 'coefficient', label: 'معامل المادة في البكالوريا (لتوزيع حصص استعمال الزمن)', type: 'number', value: getSubjectCoefficient(s) },
           { key: 'icon', label: 'الأيقونة — اسم SVG أو رابط صورة', type: 'icon', value: s.icon || '', placeholder: 'مثال: math أو https://...' },
           { key: 'color', label: 'اللون', type: 'select', value: s.color, options: colorOptions() },
           { key: 'order', label: 'موضع المادة في الترتيب', type: 'number', value: s.order || 1 }
         ],
         onSave: function (v) {
           s.name = v.name.trim() || s.name;
+          s.coefficient = Math.max(1, Math.min(20, parseInt(v.coefficient, 10) || getSubjectCoefficient(s)));
           s.icon = v.icon.trim() || 'book';
           s.color = v.color || 'indigo';
           setItemOrder(data.subjects, s.id, v.order);
-          save(); renderPanel(); toast('تم حفظ تعديلات المادة');
+          save(); renderPanel(); toast('تم حفظ تعديلات المادة ومعاملها');
         }
       });
     },
@@ -1015,9 +1320,15 @@ function renderUnitsPanel(p) {
   if (!sel.subject) { var s0 = data.subjects.slice().sort(byOrder)[0]; if (s0) sel.subject = s0.id; }
   var list = sel.subject ? unitsOf(data, sel.subject) : [];
 
+  /* الوحدة الأولى فقط مفتوحة افتراضياً والبقية مقفولة بزر سهم لإظهار/إخفاء المحتوى */
+  if (sel.subject && list.length && !adminOpenUnits[sel.subject]) {
+    adminOpenUnits[sel.subject] = {};
+    adminOpenUnits[sel.subject][list[0].id] = true;
+  }
+
   p.innerHTML =
     '<h2>' + svgIcon('layers') + ' إدارة الوحدات</h2>' +
-    '<p class="hint">اختر المادة ثم أضف وحداتها التعليمية. من التعديل تستطيع نقل الوحدة لمادة أخرى وتحديد موضعها بدقة.</p>' +
+    '<p class="hint">اختر المادة ثم أضف وحداتها التعليمية. الوحدة الأولى مفتوحة افتراضياً والبقية مطوية — اضغط زر السهم لعرض دروس وتمارين أي وحدة أو إدارتها.</p>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<select class="inp" id="uSubject">' + subjectOptions(sel.subject) + '</select>' +
@@ -1029,11 +1340,43 @@ function renderUnitsPanel(p) {
       (list.length ? list.map(function (u, i) {
         var ls = lessonsOf(data, u.id);
         var exs = unitExercisesOf(data, u.id);
-        return '<div class="item-row">' +
-          '<div class="item-ico">' + (i + 1) + '</div>' +
-          '<div class="item-info"><div class="item-title">' + escapeHtml(u.title) + '</div>' +
-          '<div class="item-sub">' + ls.length + ' درس · ' + exs.length + ' تمرين</div></div>' +
-          actsHTML(u.id, '<button class="icon-btn" data-act="copy" data-id="' + u.id + '" title="إنشاء نسخة (مع دروسها وتمارينها)">' + svgIcon('copy') + '</button>') +
+        var isOpen = !!(adminOpenUnits[sel.subject] && adminOpenUnits[sel.subject][u.id]);
+        return '<div class="unit-acc-card' + (isOpen ? ' is-open' : '') + (u.hidden ? ' is-hidden-row' : '') + '">' +
+          '<div class="item-row unit-acc-head" data-unit-head="' + u.id + '">' +
+            '<div class="item-ico">' + (i + 1) + '</div>' +
+            '<div class="item-info"><div class="item-title">' + escapeHtml(u.title) + hiddenPillHTML(u.hidden) + '</div>' +
+            '<div class="item-sub">' + ls.length + ' درس · ' + exs.length + ' تمرين</div></div>' +
+            actsHTML(u.id,
+              '<button type="button" class="btn-acc-arrow' + (isOpen ? ' open' : '') + '" data-act="toggle-open" data-id="' + u.id + '" title="' + (isOpen ? 'طي محتوى الوحدة' : 'إظهار دروس وتمارين الوحدة') + '">' +
+                '<span>' + (isOpen ? 'إخفاء' : 'إظهار') + '</span>' + svgIcon('chevron-down') +
+              '</button>' +
+              hideBtnHTML(u.id, u.hidden, 'إخفاء الوحدة عن الطلاب', 'إظهار الوحدة للطلاب') +
+              '<button class="icon-btn" data-act="copy" data-id="' + u.id + '" title="إنشاء نسخة (مع دروسها وتمارينها)">' + svgIcon('copy') + '</button>'
+            ) +
+          '</div>' +
+          (isOpen
+            ? '<div class="unit-acc-body">' +
+                '<div class="unit-acc-quick">' +
+                  '<button type="button" class="btn btn-sm" data-uquick="lessons" data-id="' + u.id + '">' + svgIcon('film') + ' إدارة الدروس (' + ls.length + ')</button>' +
+                  '<button type="button" class="btn btn-sm" data-uquick="exercises" data-id="' + u.id + '">' + svgIcon('pencil') + ' إدارة التمارين (' + exs.length + ')</button>' +
+                  '<a class="btn btn-sm" href="unit.html?unit=' + encodeURIComponent(u.id) + '" target="_blank">' + svgIcon('eye') + ' معاينة الوحدة</a>' +
+                '</div>' +
+                (ls.length || exs.length
+                  ? '<div class="unit-acc-chips">' +
+                      ls.map(function (l, li) {
+                        return '<button type="button" class="unit-mini-chip" data-uquick="open-lesson" data-id="' + l.id + '">' +
+                          svgIcon('film') + ' <span>' + (li + 1) + '. ' + escapeHtml(l.title) + '</span>' + (l.hidden ? ' <em>(مخفي)</em>' : '') +
+                        '</button>';
+                      }).join('') +
+                      exs.map(function (ex) {
+                        return '<button type="button" class="unit-mini-chip is-ex" data-uquick="open-ex" data-id="' + ex.id + '">' +
+                          svgIcon('pencil') + ' <span>' + escapeHtml(ex.title) + '</span>' + (ex.hidden ? ' <em>(مخفي)</em>' : '') +
+                        '</button>';
+                      }).join('') +
+                    '</div>'
+                  : '<div class="item-sub" style="padding:4px 2px">لا توجد دروس أو تمارين مضافة في هذه الوحدة بعد.</div>') +
+              '</div>'
+            : '') +
         '</div>';
       }).join('') : '<div class="empty">لا توجد وحدات في هذه المادة — أضف وحدة أعلاه</div>') +
     '</div>';
@@ -1044,14 +1387,49 @@ function renderUnitsPanel(p) {
     if (!sel.subject) { toast('اختر المادة أولاً', 'err'); return; }
     var t = $('#uTitle').value.trim();
     if (!t) { toast('اكتب عنوان الوحدة', 'err'); return; }
+    var newUId = uid('u');
     data.units.push({
-      id: uid('u'), subjectId: sel.subject, title: t,
+      id: newUId, subjectId: sel.subject, title: t,
       order: (unitsOf(data, sel.subject).reduce(function (m, u) { return Math.max(m, u.order || 0); }, 0) + 1)
     });
+    if (!adminOpenUnits[sel.subject]) adminOpenUnits[sel.subject] = {};
+    adminOpenUnits[sel.subject][newUId] = true;
     save(); renderPanel(); toast('تمت إضافة الوحدة');
   });
 
+  $('#unitList').addEventListener('click', function (e) {
+    var qBtn = e.target.closest('[data-uquick]');
+    if (qBtn) {
+      var qAct = qBtn.dataset.uquick, qId = qBtn.dataset.id;
+      if (qAct === 'lessons') { sel.unit = qId; goToAdminTab('lessons'); }
+      else if (qAct === 'exercises') { sel.unit = qId; goToAdminTab('exercises'); }
+      else if (qAct === 'open-lesson') { sel.lesson = qId; var lp = lessonPath(data, qId); if (lp && lp.unit) sel.unit = lp.unit.id; goToAdminTab('content'); }
+      else if (qAct === 'open-ex') { sel.exercise = qId; var ep = lessonPath(data, qId); if (ep && ep.unit) sel.unit = ep.unit.id; goToAdminTab('exercises'); }
+      return;
+    }
+    if (e.target.closest('[data-act]')) return;
+    var head = e.target.closest('[data-unit-head]');
+    if (head) {
+      var uidClick = head.dataset.unitHead;
+      if (!adminOpenUnits[sel.subject]) adminOpenUnits[sel.subject] = {};
+      adminOpenUnits[sel.subject][uidClick] = !adminOpenUnits[sel.subject][uidClick];
+      renderPanel();
+    }
+  });
+
   bindList($('#unitList'), {
+    toggleOpen: function (id) {
+      if (!adminOpenUnits[sel.subject]) adminOpenUnits[sel.subject] = {};
+      adminOpenUnits[sel.subject][id] = !adminOpenUnits[sel.subject][id];
+      renderPanel();
+    },
+    toggleHide: function (id) {
+      var u = getUnit(data, id);
+      if (!u) return;
+      u.hidden = !u.hidden;
+      save(); renderPanel();
+      toast(u.hidden ? 'تم إخفاء الوحدة عن الطلاب' : 'تم إظهار الوحدة للطلاب');
+    },
     up: function (id) { moveItem(data.units.filter(function (u) { return u.subjectId === sel.subject; }), id, -1); renderPanel(); },
     down: function (id) { moveItem(data.units.filter(function (u) { return u.subjectId === sel.subject; }), id, 1); renderPanel(); },
     rename: function (id) {
@@ -1103,7 +1481,7 @@ function renderLessonsPanel(p) {
 
   p.innerHTML =
     '<h2>' + svgIcon('film') + ' إدارة الدروس</h2>' +
-    '<p class="hint">اختر المادة ثم الوحدة وأضف الدروس.</p>' +
+    '<p class="hint">اختر المادة ثم الوحدة وأضف الدروس المرتبة (يعتمد استعمال الزمن الأسبوعي على هذا الترتيب التسلسلي للدروس).</p>' +
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<select class="inp" id="lSubject">' + subjectOptions(sel.subject) + '</select>' +
@@ -1115,13 +1493,16 @@ function renderLessonsPanel(p) {
     '<div class="admin-list" id="lessonList">' +
       (list.length ? list.map(function (l, i) {
         var res = resourcesOf(data, l.id);
-        return '<div class="item-row">' +
+        return '<div class="item-row' + (l.hidden ? ' is-hidden-row' : '') + '">' +
           '<div class="item-ico">' + (i + 1) + '</div>' +
-          '<div class="item-info"><div class="item-title">' + escapeHtml(l.title) + '</div>' +
+          '<div class="item-info"><div class="item-title">' + escapeHtml(l.title) + hiddenPillHTML(l.hidden) + '</div>' +
           '<div class="item-sub">' + res.length + ' عنصر محتوى</div></div>' +
-          actsHTML(l.id, '<button class="icon-btn" data-act="copy" data-id="' + l.id + '" title="إنشاء نسخة">' + svgIcon('copy') + '</button>' +
-                         '<button class="icon-btn" data-act="goto" data-id="' + l.id + '" title="إدارة المحتوى">' + svgIcon('plus') + '</button>' +
-                         '<button class="icon-btn" data-act="view" data-id="' + l.id + '" title="معاينة الدرس">' + svgIcon('eye') + '</button>') +
+          actsHTML(l.id,
+            hideBtnHTML(l.id, l.hidden, 'إخفاء الدرس عن الطلاب', 'إظهار الدرس للطلاب') +
+            '<button class="icon-btn" data-act="copy" data-id="' + l.id + '" title="إنشاء نسخة">' + svgIcon('copy') + '</button>' +
+            '<button class="icon-btn" data-act="goto" data-id="' + l.id + '" title="إدارة المحتوى">' + svgIcon('plus') + '</button>' +
+            '<button class="icon-btn" data-act="view" data-id="' + l.id + '" title="معاينة الدرس">' + svgIcon('eye') + '</button>'
+          ) +
         '</div>';
       }).join('') : '<div class="empty">لا توجد دروس في هذه الوحدة — أضف درساً أعلاه</div>') +
     '</div>';
@@ -1146,6 +1527,13 @@ function renderLessonsPanel(p) {
   });
 
   bindList($('#lessonList'), {
+    toggleHide: function (id) {
+      var l = getLesson(data, id);
+      if (!l) return;
+      l.hidden = !l.hidden;
+      save(); renderPanel();
+      toast(l.hidden ? 'تم إخفاء الدرس عن الطلاب' : 'تم إظهار الدرس للطلاب');
+    },
     up: function (id) { moveItem(data.lessons.filter(function (l) { return l.unitId === sel.unit && !isExerciseItem(l); }), id, -1); renderPanel(); },
     down: function (id) { moveItem(data.lessons.filter(function (l) { return l.unitId === sel.unit && !isExerciseItem(l); }), id, 1); renderPanel(); },
     rename: function (id) {
@@ -1244,15 +1632,20 @@ function renderExercisesPanel(p) {
         var pdfs = resourcesOf(data, ex.id, 'pdf');
         var imgs = resourcesOf(data, ex.id, 'image');
         var totalGroups = groupResources(imgs).length + groupResources(pdfs).length + groupResources(vids).length;
+        var syncedMatch = findMatchingResourcesAcrossUnitLessons(ex.unitId, imgs.concat(pdfs).concat(vids), ex.title);
+        var hiddenInLessons = syncedMatch.resources.length > 0 && syncedMatch.resources.every(function (r) { return !!r.hidden; });
         var isSel = activeExercise && activeExercise.id === ex.id;
-        return '<div class="item-row ex-admin-row' + (isSel ? ' active-ex-row' : '') + '" data-select-ex="' + ex.id + '">' +
+        return '<div class="item-row ex-admin-row' + (isSel ? ' active-ex-row' : '') + (ex.hidden ? ' is-hidden-row' : '') + '" data-select-ex="' + ex.id + '">' +
           '<div class="item-ico">' + (i + 1) + '</div>' +
           '<div class="item-info">' +
             '<div class="item-title">' + escapeHtml(ex.title) +
               (isSel ? ' <span class="ex-active-pill">التمرين المفتوح حالياً</span>' : '') +
+              hiddenPillHTML(ex.hidden) +
+              (hiddenInLessons ? ' <span class="hidden-pill">' + svgIcon('eye-off') + ' مخفي في الدروس</span>' : '') +
             '</div>' +
             '<div class="item-sub" dir="rtl" style="text-align:right">' +
               totalGroups + ' عنوان ديناميكي · ' + imgs.length + ' صورة · ' + pdfs.length + ' PDF · ' + vids.length + ' فيديو' +
+              (syncedMatch.lessonsCount ? ' · منسوخ في ' + syncedMatch.lessonsCount + ' درس' : '') +
             '</div>' +
           '</div>' +
           actsHTML(ex.id,
@@ -1264,6 +1657,10 @@ function renderExercisesPanel(p) {
                   svgIcon('copy') + '<span>نسخ للدروس</span>' +
                 '</button>'
               : '') +
+            '<button class="btn-mini-warn" data-act="unit-manage" data-id="' + ex.id + '" title="إخفاء أو إزالة التمرين من كل دروس الوحدة أو حذفه">' +
+              svgIcon('sliders') + '<span>إخفاء / إزالة</span>' +
+            '</button>' +
+            hideBtnHTML(ex.id, ex.hidden, 'إخفاء التمرين من صفحة التمارين', 'إظهار التمرين في صفحة التمارين') +
             '<button class="icon-btn" data-act="view" data-id="' + ex.id + '" title="معاينة صفحة التمرين">' + svgIcon('eye') + '</button>' +
             '<button class="icon-btn" data-act="copy" data-id="' + ex.id + '" title="إنشاء نسخة من التمرين">' + svgIcon('copy') + '</button>'
           ) +
@@ -1391,10 +1788,27 @@ function renderExercisesPanel(p) {
       if (newExId) sel.exercise = newExId;
       renderPanel(); toast('تم إنشاء نسخة من التمرين مع جميع ملفاته', 'info');
     },
+    unitManage: function (id) {
+      openUnitExerciseManageDialog(id);
+    },
+    toggleHide: function (id) {
+      var ex = getLesson(data, id);
+      if (!ex) return;
+      ex.hidden = !ex.hidden;
+      save(); renderPanel();
+      toast(ex.hidden ? 'تم إخفاء التمرين من صفحة التمارين' : 'تم إظهار التمرين في صفحة التمارين');
+    },
     view: function (id) { window.open('lesson.html?lesson=' + encodeURIComponent(id), '_blank'); },
     del: function (id) {
+      /* عند الضغط على سلة الحذف نفتح خيارات الحذف (من الدروس فقط أو حذف نهائي) إن كان منسوخاً للدروس */
       var ex = getLesson(data, id);
-      if (ex && confirm('حذف التمرين "' + ex.title + '" مع كل فيديوهاته وصوره وملفاته؟')) {
+      if (!ex) return;
+      var matched = findMatchingResourcesAcrossUnitLessons(ex.unitId, resourcesOf(data, ex.id, null, true), ex.title);
+      if (matched.resources.length > 0) {
+        openUnitExerciseManageDialog(id);
+        return;
+      }
+      if (confirm('حذف التمرين "' + ex.title + '" مع كل فيديوهاته وصوره وملفاته؟')) {
         deleteCascade('lesson', id);
         if (sel.exercise === id) sel.exercise = '';
         renderPanel(); toast('تم الحذف', 'info');
@@ -1410,7 +1824,7 @@ function renderExercisesPanel(p) {
       '<div class="ex-editor-title">' +
         svgIcon('sparkles') +
         '<div><strong>فقرات ومحتوى التمرين: ' + escapeHtml(activeExercise.title) + '</strong>' +
-        '<small>أضف عنواناً مع صورة أو عدة صور متتالية (مثل: نص التمرين، ثم حل تمرين 01، ثم حل تمرين 02...)، وبعد الانتهاء انسخها بنقرة واحدة إلى جميع دروس الوحدة</small></div>' +
+        '<small>أضف عنواناً مع صورة أو عدة صور متتالية (القسم الأول مفتوح افتراضياً والبقية تطوى بزر السهم)، ثم انسخها أو أزلها من دروس الوحدة</small></div>' +
       '</div>' +
       '<div class="ex-editor-acts">' +
         (exList.length > 1 ? '<select class="inp" id="exQuickSwitch" style="width:auto;min-width:175px">' + unitExerciseOptions(sel.unit, activeExercise.id) + '</select>' : '') +
@@ -1419,10 +1833,18 @@ function renderExercisesPanel(p) {
               svgIcon('copy') + ' نسخ هذا التمرين إلى دروس الوحدة (' + unitRegularLessons.length + ')' +
             '</button>'
           : '') +
+        '<button type="button" class="btn btn-sm" id="exManageSingleBtn">' + svgIcon('sliders') + ' إخفاء / إزالة من الدروس</button>' +
         '<a class="btn btn-sm" href="lesson.html?lesson=' + encodeURIComponent(activeExercise.id) + '" target="_blank">' + svgIcon('eye') + ' فتح صفحة التمرين</a>' +
       '</div>' +
     '</div>' +
     '<div id="exResInner"></div>';
+
+  var manageSingleBtn = $('#exManageSingleBtn', wrap);
+  if (manageSingleBtn) {
+    manageSingleBtn.addEventListener('click', function () {
+      openUnitExerciseManageDialog(activeExercise.id);
+    });
+  }
 
   var quickSw = $('#exQuickSwitch', wrap);
   if (quickSw) {
@@ -1601,6 +2023,16 @@ function renderResourceSections(area, lesson, opts) {
   /* في صفحة التمارين نضع «صور التمرين والحل» أولاً في الأعلى لأنها الأكثر استخداماً لإضافة مواضيع التمارين وحلولها المصوّرة */
   var kindsList = exMode ? ['image', 'pdf', 'video'] : ['video', 'pdf', 'image', 'exercise'];
   var activeKindFilter = opts.kindFilter || 'all';
+  var visibleKinds = kindsList.filter(function (k) { return activeKindFilter === 'all' || activeKindFilter === k; });
+
+  /* فتح القسم الأول فقط افتراضياً وإبقاء بقية الأقسام مطوية بزر السهم */
+  if (!adminOpenSections[lesson.id]) {
+    adminOpenSections[lesson.id] = {};
+    if (visibleKinds.length) adminOpenSections[lesson.id][visibleKinds[0]] = true;
+  }
+  if (activeKindFilter !== 'all') {
+    adminOpenSections[lesson.id][activeKindFilter] = true;
+  }
 
   var filterBarHTML = exMode
     ? '<div class="res-kind-pills" role="tablist" aria-label="أقسام محتوى التمرين">' +
@@ -1611,18 +2043,37 @@ function renderResourceSections(area, lesson, opts) {
       '</div>'
     : '';
 
-  area.innerHTML = filterBarHTML + kindsList.map(function (kind) {
-    if (activeKindFilter !== 'all' && activeKindFilter !== kind) return '';
+  area.innerHTML = filterBarHTML + visibleKinds.map(function (kind) {
     var cfg = getSectionConfig(kind, exMode);
     var items = resourcesOf(data, lesson.id, kind);
     var groups = groupResources(items);
-    return '<section class="admin-res-sec" data-sec-kind="' + kind + '">' +
-      '<h3 class="sub-title">' + svgIcon(KIND_META[kind].icon) + ' ' + cfg.heading +
-        ' <span class="cnt">' + groups.length + ' عنوان · ' + items.length + ' عنصر</span></h3>' +
-      '<div class="dyn-composer-mount" data-composer="' + kind + '"></div>' +
-      '<div class="admin-list" id="list-' + kind + '"></div>' +
+    var isOpen = !!adminOpenSections[lesson.id][kind];
+    return '<section class="admin-res-sec' + (isOpen ? ' is-open' : ' is-collapsed') + '" data-sec-kind="' + kind + '">' +
+      '<button type="button" class="admin-sec-toggle" data-sec-toggle="' + kind + '" aria-expanded="' + (isOpen ? 'true' : 'false') + '">' +
+        '<span class="admin-sec-toggle-main">' +
+          svgIcon(KIND_META[kind].icon) +
+          '<span>' + cfg.heading + '</span>' +
+          '<span class="cnt">' + groups.length + ' عنوان · ' + items.length + ' عنصر</span>' +
+        '</span>' +
+        '<span class="admin-sec-toggle-arrow">' +
+          '<small>' + (isOpen ? 'إخفاء القسم' : 'إظهار المحتوى') + '</small>' +
+          '<span class="acc-chevron">' + svgIcon('chevron-down') + '</span>' +
+        '</span>' +
+      '</button>' +
+      '<div class="admin-sec-body"' + (isOpen ? '' : ' hidden') + '>' +
+        '<div class="dyn-composer-mount" data-composer="' + kind + '"></div>' +
+        '<div class="admin-list" id="list-' + kind + '"></div>' +
+      '</div>' +
     '</section>';
   }).join('');
+
+  $all('[data-sec-toggle]', area).forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var k = btn.dataset.secToggle;
+      adminOpenSections[lesson.id][k] = !adminOpenSections[lesson.id][k];
+      renderResourceSections(area, lesson, opts);
+    });
+  });
 
   if (exMode) {
     $all('[data-kfilter]', area).forEach(function (btn) {
@@ -1633,8 +2084,8 @@ function renderResourceSections(area, lesson, opts) {
     });
   }
 
-  kindsList.forEach(function (kind) {
-    if (activeKindFilter !== 'all' && activeKindFilter !== kind) return;
+  visibleKinds.forEach(function (kind) {
+    if (!adminOpenSections[lesson.id][kind]) return;
     var cfg = getSectionConfig(kind, exMode);
     var compMount = $('[data-composer="' + kind + '"]', area);
     var listMount = $('#list-' + kind, area);
@@ -2003,81 +2454,98 @@ function renderSavedGroupsList(listMount, area, lesson, kind, cfg, opts) {
   }
 
   var groups = groupResources(items);
+  var openGKey = lesson.id + ':' + kind;
+  if (!adminOpenGroups[openGKey]) {
+    adminOpenGroups[openGKey] = {};
+    if (groups[0]) adminOpenGroups[openGKey][groups[0].id] = true;
+  }
 
   listMount.innerHTML = groups.map(function (g, gIdx) {
     var gTitle = g.title || (KIND_META[kind].label + ' ' + (gIdx + 1));
+    var isGroupOpen = !!adminOpenGroups[openGKey][g.id];
     var isImgGroup = kind === 'image' || (kind === 'exercise' && (g.exerciseType || g.items[0].exerciseType) === 'image');
     var exTypeLbl = kind === 'exercise'
       ? ' · ' + ({ image: 'صور', video: 'فيديو', pdf: 'PDF', link: 'رابط' }[g.exerciseType || g.items[0].exerciseType || 'link'] || '')
       : '';
 
-    var bodyHTML;
-    if (isImgGroup) {
-      bodyHTML = '<div class="admin-group-thumbs">' +
-        g.items.map(function (r, iIdx) {
-          return '<div class="admin-thumb-card" data-res-thumb="' + r.id + '">' +
-            '<div class="admin-thumb-preview" data-gact="item-view" data-id="' + r.id + '" title="اضغط للمعاينة">' +
-              '<span class="admin-thumb-idx">#' + (iIdx + 1) + '</span>' +
-              '<div class="admin-thumb-ph">' + svgIcon('image') + '</div>' +
-              '<img alt="' + escapeHtml(r.title || gTitle) + '" hidden>' +
-            '</div>' +
-            '<div class="admin-thumb-bar">' +
-              (g.items.length > 1
-                ? '<button type="button" class="mini-ic-btn" data-gact="item-prev" data-g="' + gIdx + '" data-id="' + r.id + '" title="تقديم الصورة"' + (iIdx === 0 ? ' disabled' : '') + '>' + svgIcon('chevron-right') + '</button>' +
-                  '<button type="button" class="mini-ic-btn" data-gact="item-next" data-g="' + gIdx + '" data-id="' + r.id + '" title="تأخير الصورة"' + (iIdx === g.items.length - 1 ? ' disabled' : '') + '>' + svgIcon('chevron-left') + '</button>'
-                : '') +
-              '<button type="button" class="mini-ic-btn" data-gact="item-view" data-id="' + r.id + '" title="معاينة">' + svgIcon('eye') + '</button>' +
-              '<button type="button" class="mini-ic-btn" data-gact="item-edit" data-id="' + r.id + '" title="تعديل الرابط أو الوصف">' + svgIcon('pencil') + '</button>' +
-              '<button type="button" class="mini-ic-btn danger" data-gact="item-del" data-id="' + r.id + '" title="حذف هذه الصورة">' + svgIcon('trash') + '</button>' +
-            '</div>' +
-          '</div>';
-        }).join('') +
-      '</div>';
-    } else {
-      bodyHTML = '<div class="admin-group-sublist">' +
-        g.items.map(function (r, iIdx) {
-          var srcTxt;
-          if (isSbUrl(r.url)) srcTxt = svgIcon('cloud') + ' ملف في السحابة' + (r.size ? ' (' + fmtSize(r.size) + ')' : '');
-          else if (isIdbUrl(r.url)) srcTxt = svgIcon('folder') + ' ملف مرفوع' + (r.size ? ' (' + fmtSize(r.size) + ')' : '');
-          else if (youtubeId(r.url)) srcTxt = svgIcon('film') + ' يوتيوب';
-          else srcTxt = svgIcon('link') + ' رابط خارجي';
+    var bodyHTML = '';
+    if (isGroupOpen) {
+      if (isImgGroup) {
+        bodyHTML = '<div class="admin-group-thumbs">' +
+          g.items.map(function (r, iIdx) {
+            return '<div class="admin-thumb-card' + (r.hidden ? ' is-hidden-row' : '') + '" data-res-thumb="' + r.id + '">' +
+              '<div class="admin-thumb-preview" data-gact="item-view" data-id="' + r.id + '" title="اضغط للمعاينة">' +
+                '<span class="admin-thumb-idx">#' + (iIdx + 1) + (r.hidden ? ' · مخفي' : '') + '</span>' +
+                '<div class="admin-thumb-ph">' + svgIcon('image') + '</div>' +
+                '<img alt="' + escapeHtml(r.title || gTitle) + '" hidden>' +
+              '</div>' +
+              '<div class="admin-thumb-bar">' +
+                (g.items.length > 1
+                  ? '<button type="button" class="mini-ic-btn" data-gact="item-prev" data-g="' + gIdx + '" data-id="' + r.id + '" title="تقديم الصورة"' + (iIdx === 0 ? ' disabled' : '') + '>' + svgIcon('chevron-right') + '</button>' +
+                    '<button type="button" class="mini-ic-btn" data-gact="item-next" data-g="' + gIdx + '" data-id="' + r.id + '" title="تأخير الصورة"' + (iIdx === g.items.length - 1 ? ' disabled' : '') + '>' + svgIcon('chevron-left') + '</button>'
+                  : '') +
+                '<button type="button" class="mini-ic-btn" data-gact="item-view" data-id="' + r.id + '" title="معاينة">' + svgIcon('eye') + '</button>' +
+                '<button type="button" class="mini-ic-btn' + (r.hidden ? ' is-hidden-btn' : '') + '" data-gact="item-hide" data-id="' + r.id + '" title="' + (r.hidden ? 'إظهار الصورة للطلاب' : 'إخفاء هذه الصورة') + '">' + svgIcon(r.hidden ? 'eye-off' : 'eye') + '</button>' +
+                '<button type="button" class="mini-ic-btn" data-gact="item-edit" data-id="' + r.id + '" title="تعديل الرابط أو الوصف">' + svgIcon('pencil') + '</button>' +
+                '<button type="button" class="mini-ic-btn danger" data-gact="item-del" data-id="' + r.id + '" title="حذف هذه الصورة">' + svgIcon('trash') + '</button>' +
+              '</div>' +
+            '</div>';
+          }).join('') +
+        '</div>';
+      } else {
+        bodyHTML = '<div class="admin-group-sublist">' +
+          g.items.map(function (r, iIdx) {
+            var srcTxt;
+            if (isSbUrl(r.url)) srcTxt = svgIcon('cloud') + ' ملف في السحابة' + (r.size ? ' (' + fmtSize(r.size) + ')' : '');
+            else if (isIdbUrl(r.url)) srcTxt = svgIcon('folder') + ' ملف مرفوع' + (r.size ? ' (' + fmtSize(r.size) + ')' : '');
+            else if (youtubeId(r.url)) srcTxt = svgIcon('film') + ' يوتيوب';
+            else srcTxt = svgIcon('link') + ' رابط خارجي';
 
-          return '<div class="admin-subitem-row">' +
-            '<span class="admin-subitem-num">' + (iIdx + 1) + '</span>' +
-            '<div class="admin-subitem-info">' +
-              '<div class="admin-subitem-title">' + escapeHtml(r.title || gTitle) + '</div>' +
-              '<div class="item-sub" dir="rtl" style="text-align:right">' + srcTxt + '</div>' +
-            '</div>' +
-            '<div class="admin-subitem-acts">' +
-              (g.items.length > 1
-                ? '<button type="button" class="mini-ic-btn" data-gact="item-prev" data-g="' + gIdx + '" data-id="' + r.id + '" title="للأعلى"' + (iIdx === 0 ? ' disabled' : '') + '>' + svgIcon('chevron-up') + '</button>' +
-                  '<button type="button" class="mini-ic-btn" data-gact="item-next" data-g="' + gIdx + '" data-id="' + r.id + '" title="للأسفل"' + (iIdx === g.items.length - 1 ? ' disabled' : '') + '>' + svgIcon('chevron-down') + '</button>'
-                : '') +
-              '<button type="button" class="mini-ic-btn" data-gact="item-view" data-id="' + r.id + '" title="معاينة">' + svgIcon('eye') + '</button>' +
-              '<button type="button" class="mini-ic-btn" data-gact="item-edit" data-id="' + r.id + '" title="تعديل العنصر">' + svgIcon('pencil') + '</button>' +
-              '<button type="button" class="mini-ic-btn danger" data-gact="item-del" data-id="' + r.id + '" title="حذف هذا العنصر">' + svgIcon('trash') + '</button>' +
-            '</div>' +
-          '</div>';
-        }).join('') +
-      '</div>';
+            return '<div class="admin-subitem-row' + (r.hidden ? ' is-hidden-row' : '') + '">' +
+              '<span class="admin-subitem-num">' + (iIdx + 1) + '</span>' +
+              '<div class="admin-subitem-info">' +
+                '<div class="admin-subitem-title">' + escapeHtml(r.title || gTitle) + hiddenPillHTML(r.hidden) + '</div>' +
+                '<div class="item-sub" dir="rtl" style="text-align:right">' + srcTxt + '</div>' +
+              '</div>' +
+              '<div class="admin-subitem-acts">' +
+                (g.items.length > 1
+                  ? '<button type="button" class="mini-ic-btn" data-gact="item-prev" data-g="' + gIdx + '" data-id="' + r.id + '" title="للأعلى"' + (iIdx === 0 ? ' disabled' : '') + '>' + svgIcon('chevron-up') + '</button>' +
+                    '<button type="button" class="mini-ic-btn" data-gact="item-next" data-g="' + gIdx + '" data-id="' + r.id + '" title="للأسفل"' + (iIdx === g.items.length - 1 ? ' disabled' : '') + '>' + svgIcon('chevron-down') + '</button>'
+                  : '') +
+                '<button type="button" class="mini-ic-btn" data-gact="item-view" data-id="' + r.id + '" title="معاينة">' + svgIcon('eye') + '</button>' +
+                '<button type="button" class="mini-ic-btn' + (r.hidden ? ' is-hidden-btn' : '') + '" data-gact="item-hide" data-id="' + r.id + '" title="' + (r.hidden ? 'إظهار للطلاب' : 'إخفاء عن الطلاب') + '">' + svgIcon(r.hidden ? 'eye-off' : 'eye') + '</button>' +
+                '<button type="button" class="mini-ic-btn" data-gact="item-edit" data-id="' + r.id + '" title="تعديل العنصر">' + svgIcon('pencil') + '</button>' +
+                '<button type="button" class="mini-ic-btn danger" data-gact="item-del" data-id="' + r.id + '" title="حذف هذا العنصر">' + svgIcon('trash') + '</button>' +
+              '</div>' +
+            '</div>';
+          }).join('') +
+        '</div>';
+      }
     }
 
-    return '<div class="res-group-admin">' +
+    return '<div class="res-group-admin' + (isGroupOpen ? ' is-open' : ' is-collapsed') + (g.allHidden ? ' is-hidden-row' : '') + '">' +
       '<div class="res-group-admin-head">' +
-        '<div class="res-group-admin-title">' +
+        '<div class="res-group-admin-title" data-gact="g-toggle" data-g="' + gIdx + '" style="cursor:pointer" title="اضغط لإظهار أو طي عناصر هذا العنوان">' +
           '<span class="item-ico">' + (gIdx + 1) + '</span>' +
           '<div>' +
-            '<div class="item-title">' + escapeHtml(gTitle) + '</div>' +
+            '<div class="item-title">' + escapeHtml(gTitle) + hiddenPillHTML(g.allHidden) + '</div>' +
             '<div class="item-sub" dir="rtl" style="text-align:right">' + g.items.length + ' عنصر تحت هذا العنوان' + exTypeLbl + '</div>' +
           '</div>' +
         '</div>' +
         '<div class="item-acts">' +
+          '<button type="button" class="btn-acc-arrow' + (isGroupOpen ? ' open' : '') + '" data-gact="g-toggle" data-g="' + gIdx + '" title="' + (isGroupOpen ? 'طي عناصر هذا العنوان' : 'إظهار عناصر هذا العنوان') + '">' +
+            '<span>' + (isGroupOpen ? 'إخفاء' : 'إظهار') + '</span>' + svgIcon('chevron-down') +
+          '</button>' +
           '<button type="button" class="btn-mini-add" data-gact="g-append" data-g="' + gIdx + '" title="إضافة صور أو ملفات أو روابط أخرى تحت هذا العنوان">' +
             svgIcon('plus') + '<span>إضافة لهذا العنوان</span>' +
           '</button>' +
           '<button type="button" class="btn-mini-copy" data-gact="g-copy-unit" data-g="' + gIdx + '" title="نسخ هذا العنوان بجميع عناصره إلى كل دروس الوحدة">' +
             svgIcon('copy') + '<span>نسخ لكل دروس الوحدة</span>' +
           '</button>' +
+          '<button type="button" class="btn-mini-warn" data-gact="g-unit-manage" data-g="' + gIdx + '" title="إخفاء أو إزالة هذا العنوان من جميع دروس الوحدة دفعة واحدة">' +
+            svgIcon('sliders') + '<span>في كل الدروس</span>' +
+          '</button>' +
+          '<button type="button" class="icon-btn' + (g.allHidden ? ' is-hidden-btn' : '') + '" data-gact="g-hide" data-g="' + gIdx + '" title="' + (g.allHidden ? 'إظهار العنوان للطلاب' : 'إخفاء هذا العنوان عن الطلاب') + '">' + svgIcon(g.allHidden ? 'eye-off' : 'eye') + '</button>' +
           '<button type="button" class="icon-btn" data-gact="g-copy" data-g="' + gIdx + '" title="نسخ المجموعة إلى وجهة محددة">' + svgIcon('copy') + '</button>' +
           '<button type="button" class="icon-btn" data-gact="g-up" data-g="' + gIdx + '" title="تحريك العنوان للأعلى"' + (gIdx === 0 ? ' disabled' : '') + '>' + svgIcon('chevron-up') + '</button>' +
           '<button type="button" class="icon-btn" data-gact="g-down" data-g="' + gIdx + '" title="تحريك العنوان للأسفل"' + (gIdx === groups.length - 1 ? ' disabled' : '') + '>' + svgIcon('chevron-down') + '</button>' +
@@ -2115,6 +2583,35 @@ function renderSavedGroupsList(listMount, area, lesson, kind, cfg, opts) {
     var itemId = btn.dataset.id;
     var currentGroups = groupResources(resourcesOf(data, lesson.id, kind));
     var targetGroup = currentGroups[gIdx];
+
+    if (act === 'g-toggle' && targetGroup) {
+      if (!adminOpenGroups[openGKey]) adminOpenGroups[openGKey] = {};
+      adminOpenGroups[openGKey][targetGroup.id] = !adminOpenGroups[openGKey][targetGroup.id];
+      renderResourceSections(area, lesson, opts);
+      return;
+    }
+    if (act === 'g-hide' && targetGroup) {
+      var nextHide = !targetGroup.allHidden;
+      targetGroup.items.forEach(function (it) { it.hidden = nextHide; });
+      save();
+      renderResourceSections(area, lesson, opts);
+      toast(nextHide ? 'تم إخفاء هذا العنوان عن الطلاب' : 'تم إظهار العنوان للطلاب');
+      return;
+    }
+    if (act === 'g-unit-manage' && targetGroup) {
+      openGroupUnitManageDialog(targetGroup, lesson, kind, area, opts);
+      return;
+    }
+    if (act === 'item-hide' && itemId) {
+      var rHide = data.resources.find(function (x) { return x.id === itemId; });
+      if (rHide) {
+        rHide.hidden = !rHide.hidden;
+        save();
+        renderResourceSections(area, lesson, opts);
+        toast(rHide.hidden ? 'تم إخفاء العنصر عن الطلاب' : 'تم إظهار العنصر للطلاب');
+      }
+      return;
+    }
 
     if (act === 'g-up' && gIdx > 0) {
       var tmpG = currentGroups[gIdx - 1];

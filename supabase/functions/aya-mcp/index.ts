@@ -28,12 +28,15 @@ interface SubjectRow {
   name: string;
   icon: string;
   color: string;
+  coefficient?: number;
+  is_hidden?: boolean;
   sort_order: number;
 }
 interface UnitRow {
   id: string;
   subject_id: string;
   title: string;
+  is_hidden?: boolean;
   sort_order: number;
 }
 interface LessonRow {
@@ -41,6 +44,7 @@ interface LessonRow {
   unit_id: string;
   title: string;
   item_type?: "lesson" | "exercise" | string;
+  is_hidden?: boolean;
   sort_order: number;
 }
 interface ResourceRow {
@@ -53,6 +57,7 @@ interface ResourceRow {
   exercise_type: string | null;
   group_id?: string | null;
   group_title?: string | null;
+  is_hidden?: boolean;
   sort_order: number;
 }
 interface SiteData {
@@ -1433,7 +1438,7 @@ const MCP_TOOLS = [
   },
   {
     name: "manage_subject",
-    description: "إدارة المواد الدراسية: create / update / delete.",
+    description: "إدارة المواد الدراسية ومعاملاتها في البكالوريا وإخفائها/إظهارها: create / update / delete.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1442,6 +1447,8 @@ const MCP_TOOLS = [
         name: { type: "string" },
         icon: { type: "string" },
         color: { type: "string" },
+        coefficient: { type: "number", description: "معامل المادة في البكالوريا (من 1 إلى 20) لتوزيع حصص استعمال الزمن الأسبوعي." },
+        is_hidden: { type: "boolean", description: "إخفاء المادة عن الطلاب أو إظهارها." },
         sort_order: { type: "number" },
       },
       required: ["action"],
@@ -1449,7 +1456,7 @@ const MCP_TOOLS = [
   },
   {
     name: "manage_unit",
-    description: "إدارة الوحدات الدراسية: create / update / delete.",
+    description: "إدارة الوحدات الدراسية وإخفائها/إظهارها: create / update / delete.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1457,6 +1464,7 @@ const MCP_TOOLS = [
         id: { type: "string" },
         subject_id: { type: "string" },
         title: { type: "string" },
+        is_hidden: { type: "boolean" },
         sort_order: { type: "number" },
       },
       required: ["action"],
@@ -1464,7 +1472,7 @@ const MCP_TOOLS = [
   },
   {
     name: "manage_lesson",
-    description: "إدارة الدروس أو تمارين الوحدة المستقلة: create / update / delete (مع item_type = lesson أو exercise).",
+    description: "إدارة الدروس أو تمارين الوحدة المستقلة وإخفائها/إظهارها: create / update / delete (مع item_type = lesson أو exercise).",
     inputSchema: {
       type: "object",
       properties: {
@@ -1473,6 +1481,7 @@ const MCP_TOOLS = [
         unit_id: { type: "string" },
         title: { type: "string" },
         item_type: { type: "string", enum: ["lesson", "exercise"] },
+        is_hidden: { type: "boolean" },
         sort_order: { type: "number" },
       },
       required: ["action"],
@@ -1480,7 +1489,7 @@ const MCP_TOOLS = [
   },
   {
     name: "manage_resource",
-    description: "إدارة محتوى الدرس أو التمرين المستقل (فيديو، ملخص PDF، صورة، أو تمرين مرفق): يدعم إضافة عنصر مفرد عبر url أو مجموعة ديناميكية (عنوان + عدة صور/فيديوهات/ملفات PDF) عبر مصفوفة urls، كما يدعم النسخ التلقائي لجميع دروس الوحدة عبر copy_to_all_unit_lessons.",
+    description: "إدارة محتوى الدرس أو التمرين المستقل (فيديو، ملخص PDF، صورة، أو تمرين مرفق): يدعم إضافة عنصر مفرد عبر url أو مجموعة ديناميكية (عنوان + عدة صور/فيديوهات/ملفات PDF) عبر مصفوفة urls، كما يدعم النسخ التلقائي لجميع دروس الوحدة عبر copy_to_all_unit_lessons والإخفاء عبر is_hidden.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1494,8 +1503,26 @@ const MCP_TOOLS = [
         url: { type: "string", description: "رابط مفرد." },
         urls: { type: "array", items: { type: "string" }, description: "مصفوفة روابط لإضافة عدة صور أو فيديوهات أو ملفات PDF تحت نفس العنوان." },
         exercise_type: { type: "string", enum: ["video", "pdf", "image", "link"] },
+        is_hidden: { type: "boolean" },
         copy_to_all_unit_lessons: { type: "boolean" },
         sort_order: { type: "number" },
+      },
+      required: ["action"],
+    },
+  },
+  {
+    name: "manage_unit_exercise",
+    description: "إزالة تمرين أو مجموعة من جميع دروس الوحدة دفعة واحدة، أو إخفاؤها/إظهارها في كل الدروس، أو حذف التمرين نهائياً من صفحة التمارين ومن جميع دروس الوحدة.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          enum: ["hide_in_lessons", "unhide_in_lessons", "remove_from_lessons", "delete_everywhere"],
+        },
+        exercise_id: { type: "string", description: "معرف التمرين المستقل (ex-...)" },
+        unit_id: { type: "string", description: "معرف الوحدة عند الاستهداف بعنوان المجموعة (group_title)" },
+        group_title: { type: "string", description: "اختياري: عنوان الفقرة/التمرين لإزالته أو إخفائه من كل دروس الوحدة" },
       },
       required: ["action"],
     },
@@ -1551,6 +1578,8 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
             name: s.name,
             icon: s.icon,
             color: s.color,
+            coefficient: s.coefficient ?? 2,
+            is_hidden: Boolean(s.is_hidden),
             sort_order: s.sort_order,
             units: sUnits.map((u) => {
               const uItems = d.lessons.filter((l) => l.unit_id === u.id);
@@ -1560,6 +1589,7 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
                   id: l.id,
                   title: l.title,
                   item_type: isRowEx(l) ? "exercise" : "lesson",
+                  is_hidden: Boolean(l.is_hidden),
                   sort_order: l.sort_order,
                   counts: {
                     videos: lRes.filter((r) => r.kind === "video").length,
@@ -1574,6 +1604,7 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
               return {
                 id: u.id,
                 title: u.title,
+                is_hidden: Boolean(u.is_hidden),
                 sort_order: u.sort_order,
                 lessons: uItems.filter((l) => !isRowEx(l)).map(mapItem),
                 unit_exercises: uItems.filter((l) => isRowEx(l)).map(mapItem),
@@ -1640,6 +1671,8 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
           name: nameVal,
           icon: String(args?.icon || det?.icon || "book"),
           color: String(args?.color || det?.color || "indigo"),
+          coefficient: Math.max(1, Math.min(20, Number(args?.coefficient) || 2)),
+          is_hidden: Boolean(args?.is_hidden),
           sort_order: Number(args?.sort_order) || maxOrder + 1,
         };
         const [saved] = await dbUpsert("subjects", [row], adminKey);
@@ -1652,6 +1685,8 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
         if (args?.name !== undefined) patch.name = String(args.name).trim();
         if (args?.icon !== undefined) patch.icon = String(args.icon).trim();
         if (args?.color !== undefined) patch.color = String(args.color).trim();
+        if (args?.coefficient !== undefined) patch.coefficient = Math.max(1, Math.min(20, Number(args.coefficient) || 2));
+        if (args?.is_hidden !== undefined) patch.is_hidden = Boolean(args.is_hidden);
         if (args?.sort_order !== undefined) patch.sort_order = Number(args.sort_order);
         const updated = await dbUpdate<SubjectRow>("subjects", id, patch, adminKey);
         return { ok: true, action: "updated", subject: updated };
@@ -1679,6 +1714,7 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
           id: uid("u"),
           subject_id: subjectId,
           title,
+          is_hidden: Boolean(args?.is_hidden),
           sort_order: Number(args?.sort_order) || maxOrder + 1,
         };
         const [saved] = await dbUpsert("units", [row], adminKey);
@@ -1690,6 +1726,7 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
         const patch: Record<string, unknown> = {};
         if (args?.subject_id !== undefined) patch.subject_id = String(args.subject_id).trim();
         if (args?.title !== undefined) patch.title = String(args.title).trim();
+        if (args?.is_hidden !== undefined) patch.is_hidden = Boolean(args.is_hidden);
         if (args?.sort_order !== undefined) patch.sort_order = Number(args.sort_order);
         const updated = await dbUpdate<UnitRow>("units", id, patch, adminKey);
         return { ok: true, action: "updated", unit: updated };
@@ -1720,6 +1757,7 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
           unit_id: unitId,
           title,
           item_type: itemType,
+          is_hidden: Boolean(args?.is_hidden),
           sort_order: Number(args?.sort_order) || maxOrder + 1,
         };
         const [saved] = await dbUpsert("lessons", [row], adminKey);
@@ -1732,6 +1770,7 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
         if (args?.unit_id !== undefined) patch.unit_id = String(args.unit_id).trim();
         if (args?.title !== undefined) patch.title = String(args.title).trim();
         if (args?.item_type !== undefined) patch.item_type = args.item_type === "exercise" ? "exercise" : "lesson";
+        if (args?.is_hidden !== undefined) patch.is_hidden = Boolean(args.is_hidden);
         if (args?.sort_order !== undefined) patch.sort_order = Number(args.sort_order);
         const updated = await dbUpdate<LessonRow>("lessons", id, patch, adminKey);
         return { ok: true, action: "updated", lesson: updated };
@@ -1777,6 +1816,7 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
             exercise_type: exType,
             group_id: groupId,
             group_title: groupTitle,
+            is_hidden: Boolean(args?.is_hidden),
             sort_order: idx === 0 && args?.sort_order ? Number(args.sort_order) : nextOrder,
           };
         });
@@ -1842,6 +1882,7 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
         if (args?.group_title !== undefined) patch.group_title = args.group_title ? String(args.group_title).trim() : null;
         if (args?.url !== undefined) patch.url = String(args.url).trim();
         if (args?.exercise_type !== undefined) patch.exercise_type = args.exercise_type;
+        if (args?.is_hidden !== undefined) patch.is_hidden = Boolean(args.is_hidden);
         if (args?.sort_order !== undefined) patch.sort_order = Number(args.sort_order);
         const updated = await dbUpdate<ResourceRow>("resources", id, patch, adminKey);
         return { ok: true, action: "updated", resource: updated };
@@ -1853,6 +1894,70 @@ async function runToolCall(name: string, args: Record<string, any>, adminKey: st
         return { ok: true, action: "deleted", id };
       }
       throw new Error(`إجراء غير معروف في manage_resource: ${action}`);
+    }
+
+    case "manage_unit_exercise": {
+      const action = String(args?.action || "").trim();
+      const exId = String(args?.exercise_id || "").trim();
+      const groupTitleArg = String(args?.group_title || "").trim();
+      let unitId = String(args?.unit_id || "").trim();
+
+      const d = await dbSelectAll();
+      const isRowEx = (l: LessonRow) => l.item_type === "exercise" || l.id.startsWith("ex-");
+
+      let seedUrls = new Set<string>();
+      let targetTitle = groupTitleArg;
+
+      if (exId) {
+        const exRow = d.lessons.find((l) => l.id === exId);
+        if (!exRow) throw new Error(`التمرين (${exId}) غير موجود.`);
+        unitId = exRow.unit_id;
+        if (!targetTitle) targetTitle = exRow.title;
+        d.resources.filter((r) => r.lesson_id === exId).forEach((r) => {
+          if (r.url) seedUrls.add(r.url);
+        });
+      }
+
+      if (!unitId) throw new Error("معرف الوحدة (unit_id) أو معرف التمرين (exercise_id) مطلوب.");
+
+      const unitLessonIds = new Set(
+        d.lessons.filter((l) => l.unit_id === unitId && !isRowEx(l)).map((l) => l.id),
+      );
+      const matchedInLessons = d.resources.filter((r) => {
+        if (!unitLessonIds.has(r.lesson_id)) return false;
+        if (r.url && seedUrls.has(r.url)) return true;
+        if (targetTitle && r.kind === "exercise" && (r.group_title || r.title || "").trim() === targetTitle) {
+          return true;
+        }
+        return false;
+      });
+
+      if (action === "hide_in_lessons" || action === "unhide_in_lessons") {
+        const flag = action === "hide_in_lessons";
+        for (const row of matchedInLessons) {
+          await dbUpdate("resources", row.id, { is_hidden: flag }, adminKey);
+        }
+        return { ok: true, action, updated_resources: matchedInLessons.length };
+      }
+
+      if (action === "remove_from_lessons") {
+        for (const row of matchedInLessons) {
+          await dbDelete("resources", row.id, adminKey);
+        }
+        return { ok: true, action, removed_from_lessons: matchedInLessons.length };
+      }
+
+      if (action === "delete_everywhere") {
+        for (const row of matchedInLessons) {
+          await dbDelete("resources", row.id, adminKey);
+        }
+        if (exId) {
+          await dbDelete("lessons", exId, adminKey);
+        }
+        return { ok: true, action, removed_from_lessons: matchedInLessons.length, deleted_exercise_id: exId || null };
+      }
+
+      throw new Error(`إجراء غير معروف في manage_unit_exercise: ${action}`);
     }
 
     case "copy_resource_to_unit_lessons": {
@@ -2116,6 +2221,7 @@ async function runClaudeAdminChat(
           "manage_unit",
           "manage_lesson",
           "manage_resource",
+          "manage_unit_exercise",
           "copy_resource_to_unit_lessons",
         ].includes(tu.name)
       ) {
@@ -2194,7 +2300,7 @@ async function handleSingleJsonRpc(
           },
           serverInfo: {
             name: "aya-bac-2027",
-            version: "1.2.1",
+            version: "1.3.0",
           },
           instructions:
             "خادم إدارة منصة «آية باك 2027» التعليمية. يدعم الدروس وتمارين الوحدات المستقلة والمجموعات الديناميكية للموارد (عنوان + عدة صور/فيديوهات/ملفات PDF عبر مصفوفة urls في manage_resource) ونسخ ومزامنة صفحة التمارين إلى دروس الوحدة.",
@@ -2383,7 +2489,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonResponse({
         ok: true,
         service: "aya-bac-2027-mcp",
-        version: "1.2.1",
+        version: "1.3.0",
         authenticated_key_present: Boolean(adminKey),
         tools_count: MCP_TOOLS.length,
         message: "خادم الذكاء الاصطناعي و Claude MCP لمنصة آية باك 2027 جاهز للاتصال.",

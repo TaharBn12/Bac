@@ -17,30 +17,40 @@
 
 -- ---------- 1) الجداول ----------
 create table if not exists public.subjects (
-  id         text primary key,
-  name       text not null,
-  icon       text not null default '📘',   -- إيموجي أو رابط صورة
-  color      text not null default 'indigo',
-  sort_order int  not null default 0
+  id          text primary key,
+  name        text not null,
+  icon        text not null default '📘',   -- إيموجي أو رابط صورة
+  color       text not null default 'indigo',
+  coefficient int  not null default 2,      -- معامل المادة في البكالوريا (لتوزيع حصص استعمال الزمن)
+  is_hidden   boolean not null default false,
+  sort_order  int  not null default 0
 );
+
+alter table public.subjects add column if not exists coefficient int not null default 2;
+alter table public.subjects add column if not exists is_hidden boolean not null default false;
 
 create table if not exists public.units (
   id         text primary key,
   subject_id text not null references public.subjects(id) on delete cascade,
   title      text not null,
+  is_hidden  boolean not null default false,
   sort_order int  not null default 0
 );
+
+alter table public.units add column if not exists is_hidden boolean not null default false;
 
 create table if not exists public.lessons (
   id         text primary key,
   unit_id    text not null references public.units(id) on delete cascade,
   title      text not null,
   item_type  text not null default 'lesson', -- lesson | exercise (درس أو تمرين مستقل داخل الوحدة)
+  is_hidden  boolean not null default false,
   sort_order int  not null default 0
 );
 
--- ترقية تلقائية آمنة إن كان الجدول منشأً مسبقاً بدون عمود item_type
+-- ترقية تلقائية آمنة إن كان الجدول منشأً مسبقاً بدون عمود item_type أو is_hidden
 alter table public.lessons add column if not exists item_type text not null default 'lesson';
+alter table public.lessons add column if not exists is_hidden boolean not null default false;
 
 create table if not exists public.resources (
   id            text primary key,
@@ -52,12 +62,14 @@ create table if not exists public.resources (
   exercise_type text,                   -- video | pdf | image | link
   group_id      text,                   -- معرّف الفقرة/المجموعة الديناميكية (عنوان يضم عنصراً أو عدة عناصر)
   group_title   text,                   -- عنوان الفقرة/المجموعة الظاهر فوق عناصرها
+  is_hidden     boolean not null default false,
   sort_order    int  not null default 0
 );
 
--- ترقية تلقائية آمنة إن كان جدول الموارد منشأً مسبقاً بدون أعمدة المجموعات الديناميكية
+-- ترقية تلقائية آمنة إن كان جدول الموارد منشأً مسبقاً بدون أعمدة المجموعات الديناميكية أو الإخفاء
 alter table public.resources add column if not exists group_id text;
 alter table public.resources add column if not exists group_title text;
+alter table public.resources add column if not exists is_hidden boolean not null default false;
 
 -- ---------- 2) تفعيل الحماية (RLS) ----------
 alter table public.subjects  enable row level security;

@@ -20,6 +20,7 @@
         <span class="logo-year">2027</span>
       </a>
       <div class="top-actions">
+        <a class="btn btn-sm btn-schedule-nav" href="schedule.html"><i data-icon="calendar"></i> استعمال الزمن</a>
         <button class="btn btn-sm btn-danger" id="logoutBtn"><i data-icon="logout"></i> خروج</button>
       </div>
     </div>
@@ -28,30 +29,44 @@
   <main class="container page">
     <div class="lesson-wrap">
       <div id="crumbs"></div>
-      <h1 class="lesson-title" id="lessonTitle"></h1>
+      <div class="lesson-head-bar">
+        <h1 class="lesson-title" id="lessonTitle"></h1>
+        <div class="lesson-complete-bar" id="lessonCompleteBar"></div>
+      </div>
 
-      <!-- مشغل الفيديو -->
-      <div class="player-shell" id="playerShell"></div>
-
-      <!-- تبويبات الفيديوهات (إن وُجد أكثر من فيديو) -->
-      <div class="video-tabs" id="videoTabs"></div>
+      <!-- قسم الفيديو -->
+      <section class="lesson-section" id="videoSection">
+        <h2><i data-icon="film"></i> شرح الفيديو</h2>
+        <div class="lesson-sec-content">
+          <!-- مشغل الفيديو -->
+          <div class="player-shell" id="playerShell"></div>
+          <!-- تبويبات الفيديوهات (إن وُجد أكثر من فيديو) -->
+          <div class="video-tabs" id="videoTabs"></div>
+        </div>
+      </section>
 
       <!-- ملفات PDF -->
       <section class="lesson-section" id="pdfSection">
         <h2><i data-icon="file"></i> ملفات وملخصات PDF</h2>
-        <div class="pdf-grid" id="pdfGrid"></div>
+        <div class="lesson-sec-content">
+          <div class="pdf-grid" id="pdfGrid"></div>
+        </div>
       </section>
 
       <!-- الصور -->
       <section class="lesson-section" id="imgSection">
         <h2><i data-icon="image"></i> صور توضيحية</h2>
-        <div class="img-gallery" id="imgGallery"></div>
+        <div class="lesson-sec-content">
+          <div class="img-gallery" id="imgGallery"></div>
+        </div>
       </section>
 
       <!-- التمارين -->
       <section class="lesson-section" id="exSection">
         <h2><i data-icon="pencil"></i> تمارين وتطبيقات</h2>
-        <div class="ex-btns" id="exBtns"></div>
+        <div class="lesson-sec-content">
+          <div class="ex-btns" id="exBtns"></div>
+        </div>
       </section>
 
       <div class="empty" id="emptyAll" hidden>
