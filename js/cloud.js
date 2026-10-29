@@ -140,8 +140,24 @@ Cloud._sync = function (data) {
     jobs.push(c.from(t.name).upsert(t.rows, { onConflict: 'id' }).then(function (res) {
       if (res && res.error) {
         var errMsg = String(res.error.message || '');
-        /* توافق رجعي آمن إذا لم يُضف عمود item_type أو group_id بعد في قاعدة خارجية قديمة */
-        if (t.name === 'lessons' && /item_type/i.test(errMsg)) {
+        /* توافق رجعي آمن إذا لم تُضف الأعمدة الجديدة بعد في قاعدة خارجية قديمة */
+        if (t.name === 'subjects' && /coefficient|is_hidden/i.test(errMsg)) {
+          var legacySubjects = t.rows.map(function (r) {
+            return { id: r.id, name: r.name, icon: r.icon, color: r.color, sort_order: r.sort_order };
+          });
+          return c.from(t.name).upsert(legacySubjects, { onConflict: 'id' }).then(function (resS) {
+            if (resS && resS.error) throw new Error(t.name + ': ' + resS.error.message);
+          });
+        }
+        if (t.name === 'units' && /is_hidden/i.test(errMsg)) {
+          var legacyUnits = t.rows.map(function (r) {
+            return { id: r.id, subject_id: r.subject_id, title: r.title, sort_order: r.sort_order };
+          });
+          return c.from(t.name).upsert(legacyUnits, { onConflict: 'id' }).then(function (resU) {
+            if (resU && resU.error) throw new Error(t.name + ': ' + resU.error.message);
+          });
+        }
+        if (t.name === 'lessons' && /item_type|is_hidden/i.test(errMsg)) {
           var legacyLessons = t.rows.map(function (r) {
             return { id: r.id, unit_id: r.unit_id, title: r.title, sort_order: r.sort_order };
           });
@@ -149,7 +165,7 @@ Cloud._sync = function (data) {
             if (res2 && res2.error) throw new Error(t.name + ': ' + res2.error.message);
           });
         }
-        if (t.name === 'resources' && /group_id|group_title/i.test(errMsg)) {
+        if (t.name === 'resources' && /group_id|group_title|is_hidden/i.test(errMsg)) {
           var legacyRes = t.rows.map(function (r) {
             return {
               id: r.id, lesson_id: r.lesson_id, kind: r.kind,
@@ -235,11 +251,33 @@ Cloud.removeFile = function (path) {
 };
 
 /* ============ التحويل بين صيغة التطبيق وصيغة قاعدة البيانات ============ */
-function subjectToRow(s)  { return { id: s.id, name: s.name, icon: s.icon || 'book', color: s.color || 'indigo', sort_order: s.order || 0 }; }
-function unitToRow(u)     { return { id: u.id, subject_id: u.subjectId, title: u.title, sort_order: u.order || 0 }; }
+function subjectToRow(s) {
+  var coeff = (typeof getSubjectCoefficient === 'function')
+    ? getSubjectCoefficient(s)
+    : (parseInt(s.coefficient, 10) || 2);
+  return {
+    id: s.id,
+    name: s.name,
+    icon: s.icon || 'book',
+    color: s.color || 'indigo',
+    coefficient: coeff,
+    is_hidden: !!s.hidden,
+    sort_order: s.order || 0
+  };
+}
+function unitToRow(u) {
+  return { id: u.id, subject_id: u.subjectId, title: u.title, is_hidden: !!u.hidden, sort_order: u.order || 0 };
+}
 function lessonToRow(l) {
   var isEx = (typeof isExerciseItem === 'function') ? isExerciseItem(l) : (l.itemType === 'exercise' || String(l.id || '').indexOf('ex-') === 0);
-  return { id: l.id, unit_id: l.unitId, title: l.title, item_type: isEx ? 'exercise' : 'lesson', sort_order: l.order || 0 };
+  return {
+    id: l.id,
+    unit_id: l.unitId,
+    title: l.title,
+    item_type: isEx ? 'exercise' : 'lesson',
+    is_hidden: !!l.hidden,
+    sort_order: l.order || 0
+  };
 }
 function resourceToRow(r) {
   return {
@@ -248,14 +286,33 @@ function resourceToRow(r) {
     exercise_type: r.exerciseType || null,
     group_id: r.groupId || null,
     group_title: r.groupTitle || null,
+    is_hidden: !!r.hidden,
     sort_order: r.order || 0
   };
 }
-function rowToSubject(r)  { return { id: r.id, name: r.name, icon: r.icon, color: r.color, order: r.sort_order }; }
-function rowToUnit(r)     { return { id: r.id, subjectId: r.subject_id, title: r.title, order: r.sort_order }; }
+function rowToSubject(r) {
+  var coeff = parseInt(r.coefficient, 10);
+  if (!coeff || coeff < 1) {
+    coeff = (typeof defaultSubjectCoefficient === 'function') ? defaultSubjectCoefficient(r.name) : 2;
+  }
+  return {
+    id: r.id, name: r.name, icon: r.icon, color: r.color,
+    coefficient: coeff,
+    hidden: !!r.is_hidden,
+    order: r.sort_order
+  };
+}
+function rowToUnit(r) {
+  return { id: r.id, subjectId: r.subject_id, title: r.title, hidden: !!r.is_hidden, order: r.sort_order };
+}
 function rowToLesson(r) {
   var isEx = r.item_type === 'exercise' || String(r.id || '').indexOf('ex-') === 0;
-  return { id: r.id, unitId: r.unit_id, title: r.title, itemType: isEx ? 'exercise' : 'lesson', order: r.sort_order };
+  return {
+    id: r.id, unitId: r.unit_id, title: r.title,
+    itemType: isEx ? 'exercise' : 'lesson',
+    hidden: !!r.is_hidden,
+    order: r.sort_order
+  };
 }
 function rowToResource(r) {
   return {
@@ -263,6 +320,7 @@ function rowToResource(r) {
     url: r.url, size: r.size, exerciseType: r.exercise_type,
     groupId: r.group_id || undefined,
     groupTitle: r.group_title || undefined,
+    hidden: !!r.is_hidden,
     order: r.sort_order
   };
 }

@@ -158,30 +158,79 @@ function resetData() {
   return loadData();
 }
 
-function getSubject(data, id) { return data.subjects.find(function (s) { return s.id === id; }) || null; }
-function getUnit(data, id)    { return data.units.find(function (u) { return u.id === id; }) || null; }
-function getLesson(data, id)  { return data.lessons.find(function (l) { return l.id === id; }) || null; }
+function getSubject(data, id) {
+  var s = data.subjects.find(function (x) { return x.id === id; }) || null;
+  if (s && s.hidden && !window.AYA_ADMIN_MODE) return null;
+  return s;
+}
+function getUnit(data, id) {
+  var u = data.units.find(function (x) { return x.id === id; }) || null;
+  if (u && u.hidden && !window.AYA_ADMIN_MODE) return null;
+  return u;
+}
+function getLesson(data, id) {
+  var l = data.lessons.find(function (x) { return x.id === id; }) || null;
+  if (l && l.hidden && !window.AYA_ADMIN_MODE) return null;
+  return l;
+}
+
+/* معامل المادة الافتراضي حسب اسمها في البكالوريا إن لم يُحدَّد بعد */
+function defaultSubjectCoefficient(name) {
+  var n = String(name || '');
+  if (/محاسبة|المحاسبي|طبيعة|طبيعية/i.test(n)) return 6;
+  if (/رياضيات|فيزياء|اقتصاد/i.test(n)) return 5;
+  if (/تاريخ|جغرافيا/i.test(n)) return 4;
+  if (/عربية/i.test(n)) return 3;
+  return 2;
+}
+
+function getSubjectCoefficient(subject) {
+  if (!subject) return 2;
+  var c = parseInt(subject.coefficient, 10);
+  if (c && c >= 1 && c <= 20) return c;
+  return defaultSubjectCoefficient(subject.name);
+}
+
+function visibleSubjectsOf(data, includeHidden) {
+  var showAll = !!(includeHidden || window.AYA_ADMIN_MODE);
+  return (data.subjects || []).filter(function (s) {
+    return showAll || !s.hidden;
+  }).sort(byOrder);
+}
 
 /* هل العنصر في جدول lessons عبارة عن تمرين مستقل داخل الوحدة أم درس عادي؟ */
 function isExerciseItem(item) {
   return !!(item && (item.itemType === 'exercise' || String(item.id || '').indexOf('ex-') === 0));
 }
 
-function unitsOf(data, subjectId) {
-  return data.units.filter(function (u) { return u.subjectId === subjectId; }).sort(byOrder);
+function unitsOf(data, subjectId, includeHidden) {
+  var showAll = !!(includeHidden || window.AYA_ADMIN_MODE);
+  return data.units.filter(function (u) {
+    return u.subjectId === subjectId && (showAll || !u.hidden);
+  }).sort(byOrder);
 }
-function lessonsOf(data, unitId) {
-  return data.lessons.filter(function (l) { return l.unitId === unitId && !isExerciseItem(l); }).sort(byOrder);
+function lessonsOf(data, unitId, includeHidden) {
+  var showAll = !!(includeHidden || window.AYA_ADMIN_MODE);
+  return data.lessons.filter(function (l) {
+    return l.unitId === unitId && !isExerciseItem(l) && (showAll || !l.hidden);
+  }).sort(byOrder);
 }
-function unitExercisesOf(data, unitId) {
-  return data.lessons.filter(function (l) { return l.unitId === unitId && isExerciseItem(l); }).sort(byOrder);
+function unitExercisesOf(data, unitId, includeHidden) {
+  var showAll = !!(includeHidden || window.AYA_ADMIN_MODE);
+  return data.lessons.filter(function (l) {
+    return l.unitId === unitId && isExerciseItem(l) && (showAll || !l.hidden);
+  }).sort(byOrder);
 }
-function allUnitItemsOf(data, unitId) {
-  return data.lessons.filter(function (l) { return l.unitId === unitId; }).sort(byOrder);
+function allUnitItemsOf(data, unitId, includeHidden) {
+  var showAll = !!(includeHidden || window.AYA_ADMIN_MODE);
+  return data.lessons.filter(function (l) {
+    return l.unitId === unitId && (showAll || !l.hidden);
+  }).sort(byOrder);
 }
-function resourcesOf(data, lessonId, kind) {
+function resourcesOf(data, lessonId, kind, includeHidden) {
+  var showAll = !!(includeHidden || window.AYA_ADMIN_MODE);
   return data.resources.filter(function (r) {
-    return r.lessonId === lessonId && (!kind || r.kind === kind);
+    return r.lessonId === lessonId && (!kind || r.kind === kind) && (showAll || !r.hidden);
   }).sort(byOrder);
 }
 
@@ -219,7 +268,106 @@ function groupResources(items) {
       });
     }
   });
+  groups.forEach(function (g) {
+    g.allHidden = g.items.length > 0 && g.items.every(function (x) { return !!x.hidden; });
+    g.someHidden = g.items.some(function (x) { return !!x.hidden; });
+  });
   return groups;
+}
+
+/* ============ تتبّع إكمال الدروس والتمارين ودورة استعمال الزمن الأسبوعية ============ */
+var COMPLETED_STORE_KEY = 'ayaBacCompleted.v1';
+
+function getCompletedMap() {
+  try {
+    var raw = localStorage.getItem(COMPLETED_STORE_KEY);
+    if (!raw) return {};
+    var parsed = JSON.parse(raw);
+    return (parsed && typeof parsed === 'object') ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function isItemCompleted(itemId) {
+  if (!itemId) return false;
+  var map = getCompletedMap();
+  return !!map[itemId];
+}
+
+function setItemCompleted(itemId, completed) {
+  if (!itemId) return false;
+  var map = getCompletedMap();
+  if (completed) {
+    map[itemId] = { completedAt: new Date().toISOString() };
+  } else {
+    delete map[itemId];
+  }
+  try {
+    localStorage.setItem(COMPLETED_STORE_KEY, JSON.stringify(map));
+  } catch (e) { /* تجاهل */ }
+  try {
+    window.dispatchEvent(new CustomEvent('aya:completion-changed', {
+      detail: { itemId: itemId, completed: !!completed }
+    }));
+  } catch (e2) { /* تجاهل */ }
+  return !!completed;
+}
+
+function toggleItemCompleted(itemId) {
+  return setItemCompleted(itemId, !isItemCompleted(itemId));
+}
+
+/* حساب دورة الأسبوع الدراسي التي تتجدد كل يوم سبت على الساعة 22:00 (10:00 ليلاً) */
+function getStudyCycleInfo(refDate) {
+  var now = refDate ? new Date(refDate) : new Date();
+  var anchor = new Date(now.getTime());
+  var daysSinceSaturday = (anchor.getDay() + 1) % 7; /* السبت=0، الأحد=1، ... الجمعة=6 */
+  anchor.setDate(anchor.getDate() - daysSinceSaturday);
+  anchor.setHours(22, 0, 0, 0);
+
+  /* إذا كنا يوم السبت قبل الساعة 22:00 ليلاً، فالدورة الحالية بدأت السبت الماضي 22:00 */
+  if (anchor.getTime() > now.getTime()) {
+    anchor.setDate(anchor.getDate() - 7);
+  }
+
+  var nextRenewal = new Date(anchor.getTime() + 7 * 24 * 60 * 60 * 1000);
+  /* تأكيد ضبط الساعة 22:00 محلياً تحسباً لأي فرق توقيت */
+  nextRenewal.setHours(22, 0, 0, 0);
+
+  var y = anchor.getFullYear();
+  var m = String(anchor.getMonth() + 1).padStart(2, '0');
+  var d = String(anchor.getDate()).padStart(2, '0');
+  var cycleKey = 'sat22-' + y + '-' + m + '-' + d;
+
+  var sundayStart = new Date(anchor.getTime());
+  sundayStart.setDate(sundayStart.getDate() + 1);
+  sundayStart.setHours(0, 0, 0, 0);
+
+  var saturdayEnd = new Date(sundayStart.getTime());
+  saturdayEnd.setDate(saturdayEnd.getDate() + 6);
+
+  var diffMs = Math.max(0, nextRenewal.getTime() - now.getTime());
+  var totalSec = Math.floor(diffMs / 1000);
+  var remDays = Math.floor(totalSec / 86400);
+  var remHours = Math.floor((totalSec % 86400) / 3600);
+  var remMinutes = Math.floor((totalSec % 3600) / 60);
+  var remSeconds = totalSec % 60;
+
+  return {
+    cycleKey: cycleKey,
+    anchor: anchor,
+    nextRenewal: nextRenewal,
+    sundayStart: sundayStart,
+    saturdayEnd: saturdayEnd,
+    remainingMs: diffMs,
+    remaining: {
+      days: remDays,
+      hours: remHours,
+      minutes: remMinutes,
+      seconds: remSeconds
+    }
+  };
 }
 function lessonPath(data, lessonId) {
   var lesson = getLesson(data, lessonId);

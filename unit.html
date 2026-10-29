@@ -20,6 +20,7 @@
         <span class="logo-year">2027</span>
       </a>
       <div class="top-actions">
+        <a class="btn btn-sm btn-schedule-nav" href="schedule.html"><i data-icon="calendar"></i> استعمال الزمن</a>
         <button class="btn btn-sm btn-danger" id="logoutBtn"><i data-icon="logout"></i> خروج</button>
       </div>
     </div>
@@ -78,50 +79,60 @@
         }
         $('#crumbs').innerHTML = breadcrumb(crumbs);
 
-        /* الترويسة */
-        var subtitle = !section
-          ? escapeHtml(subject.name) + ' — اختر القسم: الدروس أو التمارين'
-          : (section === 'exercises'
-              ? escapeHtml(subject.name) + ' — اختر التمرين لعرض الفيديو والصور وملفات PDF'
-              : escapeHtml(subject.name) + ' — اختر الدرس لمشاهدة الفيديو والملفات والتمارين');
+        function renderHeader() {
+          var doneCount = lessons.concat(exercises).filter(function (it) { return isItemCompleted(it.id); }).length;
+          var totalCount = lessons.length + exercises.length;
+          var subtitle = !section
+            ? escapeHtml(subject.name) + ' — اختر القسم: الدروس أو التمارين'
+            : (section === 'exercises'
+                ? escapeHtml(subject.name) + ' — اختر التمرين لعرض الفيديو والصور وملفات PDF'
+                : escapeHtml(subject.name) + ' — اختر الدرس لمشاهدة الفيديو والملفات والتمارين');
+          if (totalCount) {
+            subtitle += ' · <b class="txt-done">مكتمل ' + doneCount + ' من ' + totalCount + '</b>';
+          }
 
-        $('#head').innerHTML =
-          '<div class="page-head ' + colorClass + '">' +
-            '<div class="icon">' + iconHTML(subject.icon, 'layers') + '</div>' +
-            '<div><h1>' + escapeHtml(unit.title) + '</h1>' +
-            '<div class="meta">' + subtitle + '</div></div>' +
-          '</div>';
+          $('#head').innerHTML =
+            '<div class="page-head ' + colorClass + '">' +
+              '<div class="icon">' + iconHTML(subject.icon, 'layers') + '</div>' +
+              '<div><h1>' + escapeHtml(unit.title) + '</h1>' +
+              '<div class="meta">' + subtitle + '</div></div>' +
+            '</div>';
+        }
 
         var bodyEl = $('#unitBody');
 
-        /* 1) شاشة الاختيارين عند الدخول للوحدة: دروس | تمارين */
-        if (!section) {
-          bodyEl.innerHTML =
-            '<div class="unit-choices">' +
-              '<a class="unit-choice-card choice-lessons ' + colorClass + '" href="' + lessonsUrl + '">' +
-                '<div class="uc-ico">' + svgIcon('film') + '</div>' +
-                '<div class="uc-body">' +
-                  '<div class="uc-title">الدروس</div>' +
-                  '<p class="uc-desc">شرح الدروس بالفيديو، ملخصات PDF، صور توضيحية وتطبيقات</p>' +
-                  '<div class="uc-foot">' +
-                    '<span class="badge' + (lessons.length ? ' on' : '') + '">' + svgIcon('film') + ' ' + lessons.length + ' دروس</span>' +
-                    '<span class="uc-enter">تصفّح الدروس ‹</span>' +
+        function renderUnitBody() {
+          renderHeader();
+          /* 1) شاشة الاختيارين عند الدخول للوحدة: دروس | تمارين */
+          if (!section) {
+            bodyEl.innerHTML =
+              '<div class="unit-choices">' +
+                '<a class="unit-choice-card choice-lessons ' + colorClass + '" href="' + lessonsUrl + '">' +
+                  '<div class="uc-ico">' + svgIcon('film') + '</div>' +
+                  '<div class="uc-body">' +
+                    '<div class="uc-title">الدروس</div>' +
+                    '<p class="uc-desc">شرح الدروس بالفيديو، ملخصات PDF، صور توضيحية وتطبيقات</p>' +
+                    '<div class="uc-foot">' +
+                      '<span class="badge' + (lessons.length ? ' on' : '') + '">' + svgIcon('film') + ' ' + lessons.length + ' دروس</span>' +
+                      '<span class="uc-enter">تصفّح الدروس ‹</span>' +
+                    '</div>' +
                   '</div>' +
-                '</div>' +
-              '</a>' +
-              '<a class="unit-choice-card choice-exercises ' + colorClass + '" href="' + exercisesUrl + '">' +
-                '<div class="uc-ico">' + svgIcon('pencil') + '</div>' +
-                '<div class="uc-body">' +
-                  '<div class="uc-title">التمارين</div>' +
-                  '<p class="uc-desc">تمارين وسلاسل الوحدة المحلولة بالفيديو والصور وملفات PDF</p>' +
-                  '<div class="uc-foot">' +
-                    '<span class="badge' + (exercises.length ? ' on' : '') + '">' + svgIcon('pencil') + ' ' + exercises.length + ' تمارين</span>' +
-                    '<span class="uc-enter">تصفّح التمارين ‹</span>' +
+                '</a>' +
+                '<a class="unit-choice-card choice-exercises ' + colorClass + '" href="' + exercisesUrl + '">' +
+                  '<div class="uc-ico">' + svgIcon('pencil') + '</div>' +
+                  '<div class="uc-body">' +
+                    '<div class="uc-title">التمارين</div>' +
+                    '<p class="uc-desc">تمارين وسلاسل الوحدة المحلولة بالفيديو والصور وملفات PDF</p>' +
+                    '<div class="uc-foot">' +
+                      '<span class="badge' + (exercises.length ? ' on' : '') + '">' + svgIcon('pencil') + ' ' + exercises.length + ' تمارين</span>' +
+                      '<span class="uc-enter">تصفّح التمارين ‹</span>' +
+                    '</div>' +
                   '</div>' +
-                '</div>' +
-              '</a>' +
-            '</div>';
-        } else {
+                '</a>' +
+              '</div>';
+            return;
+          }
+
           /* شريط تبديل سريع بين الدروس والتمارين داخل الوحدة */
           var switcherHTML =
             '<div class="unit-switch">' +
@@ -141,16 +152,23 @@
                 var vids = resourcesOf(data, l.id, 'video').length;
                 var files = resourcesOf(data, l.id, 'pdf').length + resourcesOf(data, l.id, 'image').length;
                 var exs = resourcesOf(data, l.id, 'exercise').length;
-                return '<a class="row-card ' + colorClass + '" href="lesson.html?lesson=' + encodeURIComponent(l.id) + '">' +
-                  '<div class="num">' + (i + 1) + '</div>' +
-                  '<div class="info"><div class="t">' + escapeHtml(l.title) + '</div>' +
-                  '<div class="badges">' +
-                    '<span class="badge' + (vids ? ' on' : '') + '">' + svgIcon('film') + ' ' + vids + ' فيديو</span>' +
-                    '<span class="badge' + (files ? ' on' : '') + '">' + svgIcon('file') + ' ' + files + ' ملف</span>' +
-                    (exs ? '<span class="badge on">' + svgIcon('pencil') + ' ' + exs + ' تمرين</span>' : '') +
-                  '</div></div>' +
-                  '<div class="arrow">‹</div>' +
-                '</a>';
+                var done = isItemCompleted(l.id);
+                return '<div class="row-card-wrap' + (done ? ' is-completed-card' : '') + '">' +
+                  '<a class="row-card ' + colorClass + (done ? ' is-completed-item' : '') + '" href="lesson.html?lesson=' + encodeURIComponent(l.id) + '">' +
+                    '<div class="num">' + (done ? svgIcon('check') : (i + 1)) + '</div>' +
+                    '<div class="info"><div class="t">' + escapeHtml(l.title) + '</div>' +
+                    '<div class="badges">' +
+                      (done ? '<span class="badge done-badge">' + svgIcon('check-circle') + ' مكتمل</span>' : '') +
+                      '<span class="badge' + (vids ? ' on' : '') + '">' + svgIcon('film') + ' ' + vids + ' فيديو</span>' +
+                      '<span class="badge' + (files ? ' on' : '') + '">' + svgIcon('file') + ' ' + files + ' ملف</span>' +
+                      (exs ? '<span class="badge on">' + svgIcon('pencil') + ' ' + exs + ' تمرين</span>' : '') +
+                    '</div></div>' +
+                    '<div class="arrow">‹</div>' +
+                  '</a>' +
+                  '<button type="button" class="card-complete-btn' + (done ? ' done' : '') + '" data-complete-id="' + l.id + '" title="' + (done ? 'مكتمل — اضغط للإلغاء' : 'إكمال الدرس (يظهر بالأخضر في استعمال الزمن)') + '">' +
+                    svgIcon(done ? 'check-circle' : 'check') + '<span>' + (done ? 'مكتمل ✓' : 'إكمال الدرس') + '</span>' +
+                  '</button>' +
+                '</div>';
               }).join('') + '</div>';
             }
           } else {
@@ -162,21 +180,39 @@
                 var vids = resourcesOf(data, ex.id, 'video').length;
                 var pdfs = resourcesOf(data, ex.id, 'pdf').length;
                 var imgs = resourcesOf(data, ex.id, 'image').length;
-                return '<a class="row-card exercise-row-card ' + colorClass + '" href="lesson.html?lesson=' + encodeURIComponent(ex.id) + '">' +
-                  '<div class="num">' + (i + 1) + '</div>' +
-                  '<div class="info"><div class="t">' + escapeHtml(ex.title) + '</div>' +
-                  '<div class="badges">' +
-                    '<span class="badge' + (vids ? ' on' : '') + '">' + svgIcon('film') + ' ' + vids + ' فيديو</span>' +
-                    '<span class="badge' + (pdfs ? ' on' : '') + '">' + svgIcon('file') + ' ' + pdfs + ' PDF</span>' +
-                    '<span class="badge' + (imgs ? ' on' : '') + '">' + svgIcon('image') + ' ' + imgs + ' صورة</span>' +
-                  '</div></div>' +
-                  '<div class="arrow">‹</div>' +
-                '</a>';
+                var done = isItemCompleted(ex.id);
+                return '<div class="row-card-wrap' + (done ? ' is-completed-card' : '') + '">' +
+                  '<a class="row-card exercise-row-card ' + colorClass + (done ? ' is-completed-item' : '') + '" href="lesson.html?lesson=' + encodeURIComponent(ex.id) + '">' +
+                    '<div class="num">' + (done ? svgIcon('check') : (i + 1)) + '</div>' +
+                    '<div class="info"><div class="t">' + escapeHtml(ex.title) + '</div>' +
+                    '<div class="badges">' +
+                      (done ? '<span class="badge done-badge">' + svgIcon('check-circle') + ' مكتمل</span>' : '') +
+                      '<span class="badge' + (vids ? ' on' : '') + '">' + svgIcon('film') + ' ' + vids + ' فيديو</span>' +
+                      '<span class="badge' + (pdfs ? ' on' : '') + '">' + svgIcon('file') + ' ' + pdfs + ' PDF</span>' +
+                      '<span class="badge' + (imgs ? ' on' : '') + '">' + svgIcon('image') + ' ' + imgs + ' صورة</span>' +
+                    '</div></div>' +
+                    '<div class="arrow">‹</div>' +
+                  '</a>' +
+                  '<button type="button" class="card-complete-btn' + (done ? ' done' : '') + '" data-complete-id="' + ex.id + '" title="' + (done ? 'مكتمل — اضغط للإلغاء' : 'إكمال التمرين (يظهر بالأخضر في استعمال الزمن)') + '">' +
+                    svgIcon(done ? 'check-circle' : 'check') + '<span>' + (done ? 'مكتمل ✓' : 'إكمال التمرين') + '</span>' +
+                  '</button>' +
+                '</div>';
               }).join('') + '</div>';
             }
           }
         }
 
+        bodyEl.addEventListener('click', function (e) {
+          var cBtn = e.target.closest('[data-complete-id]');
+          if (!cBtn) return;
+          e.preventDefault();
+          e.stopPropagation();
+          var nowDone = toggleItemCompleted(cBtn.dataset.completeId);
+          renderUnitBody();
+          toast(nowDone ? 'أحسنت! ظهر العنصر باللون الأخضر في استعمال الزمن ولن يتكرر الأسبوع القادم' : 'تم إلغاء علامة الإكمال', nowDone ? 'ok' : 'info');
+        });
+
+        renderUnitBody();
         $('#logoutBtn').addEventListener('click', doLogout);
       });
     })();

@@ -297,13 +297,52 @@ function initLessonPage() {
   $('#lessonTitle').innerHTML =
     (isExPage ? svgIcon('pencil') : iconHTML(subject.icon, 'film')) + ' ' + escapeHtml(lesson.title);
 
+  /* زر إكمال الدرس أو التمرين (يتزامن مع استعمال الزمن الأسبوعي ويتحول للأخضر) */
+  var completeBar = $('#lessonCompleteBar');
+  function renderCompleteButton() {
+    if (!completeBar || typeof isItemCompleted !== 'function') return;
+    var done = isItemCompleted(lesson.id);
+    var noun = isExPage ? 'التمرين' : 'الدرس';
+    completeBar.innerHTML =
+      '<button type="button" class="btn-complete-item' + (done ? ' is-completed' : '') + '" id="completeItemBtn">' +
+        svgIcon(done ? 'check-circle' : 'check') +
+        '<span>' + (done ? ('مكتمل ✓ — تم إنهاء هذا ' + noun) : ('إكمال ' + noun)) + '</span>' +
+      '</button>' +
+      '<a class="btn btn-sm" href="schedule.html" title="فتح استعمال الزمن الأسبوعي">' +
+        svgIcon('calendar') + '<span>استعمال الزمن</span>' +
+      '</a>';
+    $('#completeItemBtn').addEventListener('click', function () {
+      var nowDone = toggleItemCompleted(lesson.id);
+      renderCompleteButton();
+      if (nowDone) {
+        toast('أحسنت! تم تحديد ' + noun + ' كمكتمل باللون الأخضر في استعمال الزمن ولن يتكرر الأسبوع القادم');
+      } else {
+        toast('تم إلغاء علامة الإكمال عن هذا ' + noun, 'info');
+      }
+    });
+  }
+  renderCompleteButton();
+
+  var vidSection = $('#videoSection');
+  var pdfSection = $('#pdfSection');
+  var imgSection = $('#imgSection');
+  var exSection  = $('#exSection');
+
   if (isExPage) {
+    var vidH2 = $('#videoSection > h2');
+    if (vidH2) vidH2.innerHTML = svgIcon('film') + ' فيديوهات حل التمرين';
     var pdfH2 = $('#pdfSection > h2');
     if (pdfH2) pdfH2.innerHTML = svgIcon('file') + ' ملفات التمرين والحل PDF';
     var imgH2 = $('#imgSection > h2');
     if (imgH2) imgH2.innerHTML = svgIcon('image') + ' صور التمرين والحل';
     var emptyEl = $('#emptyAll');
     if (emptyEl) emptyEl.textContent = 'هذا التمرين لا يحتوي على محتوى بعد';
+
+    /* في صفحة التمرين المستقل نضع الصور والـ PDF في الأعلى قبل الفيديو */
+    if (vidSection && vidSection.parentNode) {
+      if (imgSection) vidSection.parentNode.insertBefore(imgSection, vidSection);
+      if (pdfSection) vidSection.parentNode.insertBefore(pdfSection, vidSection);
+    }
   }
 
   var videos = resourcesOf(data, lesson.id, 'video');
@@ -315,7 +354,23 @@ function initLessonPage() {
   var shellEl = $('#playerShell');
   var tabsEl = $('#videoTabs');
 
+  function openSectionAccordion(secEl) {
+    if (!secEl) return;
+    secEl.style.display = '';
+    secEl.classList.add('is-open');
+    secEl.classList.remove('is-collapsed');
+    var body = secEl.querySelector('.lesson-sec-content');
+    if (body) body.hidden = false;
+    var tBtn = secEl.querySelector('.sec-acc-toggle');
+    if (tBtn) {
+      tBtn.setAttribute('aria-expanded', 'true');
+      var lbl = tBtn.querySelector('.sec-acc-lbl');
+      if (lbl) lbl.textContent = 'إخفاء';
+    }
+  }
+
   function ensurePlayer() {
+    if (vidSection) openSectionAccordion(vidSection);
     shellEl.hidden = false;
     if (!player) player = new AyaPlayer(shellEl);
     return player;
@@ -366,15 +421,11 @@ function initLessonPage() {
     });
 
     player.load(videos[0]);
-  } else if (isExPage || (!pdfs.length && !images.length && !exs.length)) {
-    /* في صفحة التمرين المستقل (أو عند الفراغ التام) نخفي المشغل إن لم يُضف له فيديو ليبقى عرض PDF/الصور أنيقاً */
+  } else {
+    /* إخفاء قسم الفيديو إذا لم يكن فيه فيديوهات (ويُعاد إظهاره تلقائياً إذا شغل الطالب تمرين فيديو) */
     shellEl.hidden = true;
     tabsEl.hidden = true;
-  } else {
-    shellEl.innerHTML =
-      '<div class="player"><div class="player-error" style="position:relative;display:grid">' +
-      '<div>' + svgIcon('film') + ' لا توجد فيديوهات في هذا الدرس بعد</div>' +
-      '</div></div>';
+    if (vidSection) vidSection.style.display = 'none';
   }
 
   /* ---- ملفات PDF (مع دعم العناوين الديناميكية وملف أو عدة ملفات تحت كل عنوان) ---- */
@@ -501,14 +552,11 @@ function initLessonPage() {
     var mainImageSlots = new Array(images.length);
     var defaultStackMode = isExPage;
 
-    /* شريط تبديل طريقة عرض الصور (صفحات كبيرة متتابعة واضحة للحلول أو شبكة مصغّرة) */
-    var imgSecHead = $('#imgSection > h2');
-    if (imgSecHead && imgSecHead.parentNode) {
-      var headBar = document.createElement('div');
-      headBar.className = 'sec-head-bar';
-      imgSecHead.parentNode.insertBefore(headBar, imgSecHead);
-      headBar.appendChild(imgSecHead);
-
+    /* شريط تبديل طريقة عرض الصور (صفحات كبيرة متتابعة واضحة للحلول أو شبكة مصغّرة) داخل جسم القسم */
+    var imgSecContent = $('#imgSection .lesson-sec-content');
+    if (imgSecContent) {
+      var modeSwitchBar = document.createElement('div');
+      modeSwitchBar.className = 'sec-subtools-bar';
       var modeSwitch = document.createElement('div');
       modeSwitch.className = 'img-mode-switch';
       modeSwitch.innerHTML =
@@ -516,7 +564,8 @@ function initLessonPage() {
           svgIcon('layers') + ' صفحات واضحة</button>' +
         '<button type="button" class="img-mode-btn' + (!defaultStackMode ? ' active' : '') + '" data-imode="grid">' +
           svgIcon('image') + ' شبكة</button>';
-      headBar.appendChild(modeSwitch);
+      modeSwitchBar.appendChild(modeSwitch);
+      imgSecContent.insertBefore(modeSwitchBar, galEl);
 
       modeSwitch.addEventListener('click', function (e) {
         var b = e.target.closest('[data-imode]');
@@ -592,17 +641,12 @@ function initLessonPage() {
     var hasCardExGroups = hasImageExGroups || exGroups.some(function (g) { return g.items.length > 1; });
     if (hasCardExGroups) exEl.classList.add('ex-groups-mixed');
 
-    /* شريط رأس قسم التمارين: تبديل (صفحات واضحة / شبكة) + رابط سريع لصفحة تمارين الوحدة المستقلة إن وجدت */
-    var exSecHead = $('#exSection > h2');
+    /* شريط أدوات قسم التمارين داخل جسم القسم (تظهر عند فتح قسم التمارين) */
+    var exSecContent = $('#exSection .lesson-sec-content');
     var standaloneUnitExs = (!isExPage && typeof unitExercisesOf === 'function' && unit) ? unitExercisesOf(data, unit.id) : [];
-    if (exSecHead && exSecHead.parentNode && (hasImageExGroups || standaloneUnitExs.length)) {
-      var exHeadBar = document.createElement('div');
-      exHeadBar.className = 'sec-head-bar';
-      exSecHead.parentNode.insertBefore(exHeadBar, exSecHead);
-      exHeadBar.appendChild(exSecHead);
-
+    if (exSecContent && (hasImageExGroups || standaloneUnitExs.length)) {
       var exHeadTools = document.createElement('div');
-      exHeadTools.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap';
+      exHeadTools.className = 'sec-subtools-bar';
 
       if (standaloneUnitExs.length) {
         var unitExLink = document.createElement('a');
@@ -632,7 +676,7 @@ function initLessonPage() {
         exHeadTools.appendChild(exModeSwitch);
       }
 
-      exHeadBar.appendChild(exHeadTools);
+      exSecContent.insertBefore(exHeadTools, exEl);
     }
 
     exGroups.forEach(function (eg, gIdx) {
@@ -745,6 +789,124 @@ function initLessonPage() {
   } else {
     $('#exSection').style.display = 'none';
   }
+
+  /* ---- تفعيل الطي الذكي للأقسام والمجموعات (فتح القسم/العنوان الأول فقط وإغلاق البقية بزر سهم) ---- */
+  function setupCollapsibleGroupsInSection(secEl) {
+    var cards = $all('.media-group-card', secEl);
+    if (cards.length <= 1) return;
+
+    var secBody = secEl.querySelector('.lesson-sec-content');
+    if (secBody) {
+      var subBar = secBody.querySelector('.sec-subtools-bar');
+      if (!subBar) {
+        subBar = document.createElement('div');
+        subBar.className = 'sec-subtools-bar';
+        secBody.insertBefore(subBar, secBody.firstChild);
+      }
+      var toggleAllBtn = document.createElement('button');
+      toggleAllBtn.type = 'button';
+      toggleAllBtn.className = 'btn btn-sm';
+      var allExpanded = false;
+      function syncToggleAllLbl() {
+        toggleAllBtn.innerHTML = svgIcon(allExpanded ? 'chevron-up' : 'chevron-down') +
+          ' ' + (allExpanded ? 'طي العناوين الفرعية' : 'فتح كل العناوين (' + cards.length + ')');
+      }
+      syncToggleAllLbl();
+      toggleAllBtn.addEventListener('click', function () {
+        allExpanded = !allExpanded;
+        cards.forEach(function (c, idx) {
+          var open = allExpanded ? true : (idx === 0);
+          setGroupCardOpen(c, open);
+        });
+        syncToggleAllLbl();
+      });
+      subBar.appendChild(toggleAllBtn);
+    }
+
+    function setGroupCardOpen(card, open) {
+      card.classList.toggle('is-open', open);
+      card.classList.toggle('is-collapsed', !open);
+      Array.prototype.forEach.call(card.children, function (ch) {
+        if (!ch.classList.contains('media-group-head')) ch.hidden = !open;
+      });
+      var arrBtn = card.querySelector('.mg-acc-btn');
+      if (arrBtn) {
+        arrBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        var sp = arrBtn.querySelector('span');
+        if (sp) sp.textContent = open ? 'إخفاء' : 'إظهار المحتوى';
+      }
+    }
+
+    cards.forEach(function (card, idx) {
+      var head = card.querySelector('.media-group-head');
+      if (!head) return;
+      head.style.cursor = 'pointer';
+      var arrBtn = document.createElement('button');
+      arrBtn.type = 'button';
+      arrBtn.className = 'btn-acc-arrow mg-acc-btn';
+      arrBtn.innerHTML = '<span>' + (idx === 0 ? 'إخفاء' : 'إظهار المحتوى') + '</span>' + svgIcon('chevron-down');
+      head.appendChild(arrBtn);
+
+      setGroupCardOpen(card, idx === 0);
+
+      head.addEventListener('click', function (e) {
+        if (e.target.closest('.ex-open-gal-btn')) return;
+        var nextOpen = card.classList.contains('is-collapsed');
+        setGroupCardOpen(card, nextOpen);
+      });
+    });
+  }
+
+  var sectionCounts = {
+    videoSection: videos.length ? (videos.length + ' فيديو') : '',
+    pdfSection:   pdfs.length ? (pdfs.length + ' ملف') : '',
+    imgSection:   images.length ? (groupResources(images).length + ' عنوان · ' + images.length + ' صورة') : '',
+    exSection:    exs.length ? (groupResources(exs).length + ' عنوان · ' + exs.length + ' عنصر') : ''
+  };
+
+  var visibleSections = $all('.lesson-wrap > .lesson-section').filter(function (sec) {
+    return sec.style.display !== 'none';
+  });
+
+  visibleSections.forEach(function (sec, idx) {
+    setupCollapsibleGroupsInSection(sec);
+    var h2 = sec.querySelector(':scope > h2');
+    var body = sec.querySelector(':scope > .lesson-sec-content');
+    if (!h2 || !body) return;
+
+    var toggleBar = document.createElement('button');
+    toggleBar.type = 'button';
+    toggleBar.className = 'sec-acc-toggle';
+    var countTxt = sectionCounts[sec.id] || '';
+    var isFirst = (idx === 0);
+
+    toggleBar.setAttribute('aria-expanded', isFirst ? 'true' : 'false');
+    toggleBar.innerHTML =
+      '<span class="sec-acc-title">' + h2.innerHTML +
+        (countTxt ? ' <span class="sec-acc-cnt">' + escapeHtml(countTxt) + '</span>' : '') +
+      '</span>' +
+      '<span class="sec-acc-arrow">' +
+        '<span class="sec-acc-lbl">' + (isFirst ? 'إخفاء' : 'إظهار المحتوى') + '</span>' +
+        '<span class="acc-chevron">' + svgIcon('chevron-down') + '</span>' +
+      '</span>';
+
+    sec.insertBefore(toggleBar, h2);
+    h2.remove();
+
+    sec.classList.toggle('is-open', isFirst);
+    sec.classList.toggle('is-collapsed', !isFirst);
+    body.hidden = !isFirst;
+
+    toggleBar.addEventListener('click', function () {
+      var nowOpen = body.hidden;
+      body.hidden = !nowOpen;
+      sec.classList.toggle('is-open', nowOpen);
+      sec.classList.toggle('is-collapsed', !nowOpen);
+      toggleBar.setAttribute('aria-expanded', nowOpen ? 'true' : 'false');
+      var lbl = toggleBar.querySelector('.sec-acc-lbl');
+      if (lbl) lbl.textContent = nowOpen ? 'إخفاء' : 'إظهار المحتوى';
+    });
+  });
 
   /* إذا كان الدرس أو التمرين فارغاً تماماً نعرض تنبيه الفراغ */
   if (!videos.length && !pdfs.length && !images.length && !exs.length) {

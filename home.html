@@ -20,6 +20,7 @@
         <span class="logo-year">2027</span>
       </a>
       <div class="top-actions">
+        <a class="btn btn-sm btn-schedule-nav" href="schedule.html"><i data-icon="calendar"></i> استعمال الزمن</a>
         <button class="btn btn-sm btn-danger" id="logoutBtn"><i data-icon="logout"></i> خروج</button>
       </div>
     </div>
@@ -34,6 +35,8 @@
         <input type="search" id="searchInput" placeholder="ابحث عن مادة..." autocomplete="off">
       </div>
     </section>
+
+    <div id="schedulePromoMount"></div>
 
     <h2 class="section-title"><i data-icon="book"></i> المواد الدراسية</h2>
     <div class="grid" id="subjectsGrid"></div>
@@ -58,10 +61,39 @@
       hydrateIcons();
       initData().then(function () {
       var data = loadData();
+      var allVisibleSubjects = visibleSubjectsOf(data);
+
+      /* بطاقة استعمال الزمن الدراسي الأسبوعي */
+      var promoMount = $('#schedulePromoMount');
+      if (promoMount && typeof getStudyCycleInfo === 'function') {
+        var cycle = getStudyCycleInfo();
+        var totalItems = 0, completedItems = 0;
+        allVisibleSubjects.forEach(function (s) {
+          unitsOf(data, s.id).forEach(function (u) {
+            lessonsOf(data, u.id).concat(unitExercisesOf(data, u.id)).forEach(function (it) {
+              totalItems++;
+              if (isItemCompleted(it.id)) completedItems++;
+            });
+          });
+        });
+        promoMount.innerHTML =
+          '<a class="schedule-home-banner" href="schedule.html">' +
+            '<div class="shb-icon">' + svgIcon('calendar') + '</div>' +
+            '<div class="shb-body">' +
+              '<div class="shb-kicker">' + svgIcon('clock') + ' يتجدد تلقائياً كل سبت على 10:00 ليلاً · باقي ' +
+                cycle.remaining.days + ' يوم و ' + cycle.remaining.hours + ' ساعة</div>' +
+              '<h2>استعمال الزمن الدراسي الأسبوعي الذكي</h2>' +
+              '<p>خطة أسبوعية مرتّبة حسب معامل كل مادة وتسلسل الدروس — أنجزتِ حتى الآن <b>' + completedItems + '</b> من أصل <b>' + totalItems + '</b> درس وتمرين</p>' +
+            '</div>' +
+            '<div class="shb-cta">' +
+              '<span class="btn btn-primary">' + svgIcon('calendar') + ' فتح استعمال الزمن</span>' +
+            '</div>' +
+          '</a>';
+      }
 
       function renderSubjects(filter) {
       var grid = $('#subjectsGrid');
-      var list = data.subjects.slice().sort(byOrder)
+      var list = visibleSubjectsOf(data)
         .filter(function (s) {
           return !filter || s.name.indexOf(filter.trim()) !== -1;
         });
@@ -73,13 +105,23 @@
 
       grid.innerHTML = list.map(function (s) {
         var units = unitsOf(data, s.id);
-        var lessonCount = units.reduce(function (n, u) { return n + lessonsOf(data, u.id).length; }, 0);
-        var exCount = units.reduce(function (n, u) { return n + unitExercisesOf(data, u.id).length; }, 0);
+        var coeff = getSubjectCoefficient(s);
+        var lessonCount = 0, exCount = 0, doneCount = 0;
+        units.forEach(function (u) {
+          var ls = lessonsOf(data, u.id);
+          var exs = unitExercisesOf(data, u.id);
+          lessonCount += ls.length;
+          exCount += exs.length;
+          ls.concat(exs).forEach(function (it) { if (isItemCompleted(it.id)) doneCount++; });
+        });
+        var totalInSubj = lessonCount + exCount;
         return '<a class="subject-card ' + (s.color ? 'c-' + s.color : '') + '" href="subject.html?subject=' + encodeURIComponent(s.id) + '">' +
+          '<span class="subj-coeff-badge">المعامل ' + coeff + '</span>' +
           '<span class="arrow">‹</span>' +
           '<div class="icon">' + iconHTML(s.icon, 'book') + '</div>' +
           '<div class="name">' + escapeHtml(s.name) + '</div>' +
           '<div class="meta">' + units.length + ' وحدات · ' + lessonCount + ' دروس' + (exCount ? ' · ' + exCount + ' تمارين' : '') + '</div>' +
+          (doneCount > 0 ? '<div class="subj-done-pill">' + svgIcon('check-circle') + ' مكتمل ' + doneCount + ' / ' + totalInSubj + '</div>' : '') +
         '</a>';
       }).join('');
     }
