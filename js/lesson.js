@@ -327,14 +327,17 @@ function initLessonPage() {
     pdfs.forEach(function (p) {
       resolveSrc(p.url).then(function (res) {
         if (res.kind === 'error') return;
-        var card = document.createElement('div');
+        var card = document.createElement('article');
+        var summaryName = p.title || res.fileName || 'ملخص PDF';
         card.className = 'pdf-card';
+        /* لا نعرض الرابط إطلاقاً: الاسم الذي يضعه المدير هو النص الوحيد الظاهر. */
         card.innerHTML =
           '<div class="pdf-ico">' + svgIcon('file') + '</div>' +
-          '<div class="t">' + escapeHtml(p.title || 'ملف PDF') + '</div>' +
-          '<div class="acts">' +
-            '<a class="btn btn-icon" target="_blank" rel="noopener" href="' + escapeHtml(res.src) + '" title="عرض الملخص" aria-label="عرض الملخص">' + svgIcon('eye') + '</a>' +
-            '<a class="btn btn-icon" download="' + escapeHtml(res.fileName || 'file.pdf') + '" href="' + escapeHtml(res.src) + '" title="تنزيل الملخص" aria-label="تنزيل الملخص">' + svgIcon('download') + '</a>' +
+          '<div class="pdf-copy"><div class="t" title="' + escapeHtml(summaryName) + '">' + escapeHtml(summaryName) + '</div>' +
+            '<span class="pdf-kind">ملخص PDF</span></div>' +
+          '<div class="acts" aria-label="خيارات الملخص">' +
+            '<a class="btn btn-icon" target="_blank" rel="noopener" href="' + escapeHtml(res.src) + '" title="مشاهدة الملخص" aria-label="مشاهدة ' + escapeHtml(summaryName) + '">' + svgIcon('eye') + '</a>' +
+            '<a class="btn btn-icon" download="' + escapeHtml(res.fileName || summaryName + '.pdf') + '" href="' + escapeHtml(res.src) + '" title="تنزيل الملخص" aria-label="تنزيل ' + escapeHtml(summaryName) + '">' + svgIcon('download') + '</a>' +
           '</div>';
         pdfEl.appendChild(card);
       });
@@ -411,10 +414,15 @@ function initLessonPage() {
     exs.forEach(function (ex) {
       var type = ex.exerciseType || 'link';
       var btn = document.createElement('button');
-      btn.className = 'ex-btn';
+      var exerciseTitle = ex.title || 'تمرين';
+      btn.type = 'button';
+      btn.className = 'ex-btn ex-' + type;
+      btn.setAttribute('aria-label', 'فتح ' + exerciseTitle);
       var ico = svgIcon(type === 'video' ? 'film' : (type === 'pdf' ? 'file' : 'link'));
-      var kindLbl = type === 'video' ? 'فيديو' : (type === 'pdf' ? 'PDF' : 'رابط');
-      btn.innerHTML = '<span>' + ico + '</span> ' + escapeHtml(ex.title || 'تمرين') + ' <span class="k">(' + kindLbl + ')</span>';
+      var kindLbl = type === 'video' ? 'فيديو تطبيقي' : (type === 'pdf' ? 'تمرين PDF' : 'رابط تطبيقي');
+      btn.innerHTML = '<span class="ex-icon">' + ico + '</span>' +
+        '<span class="ex-copy"><strong>' + escapeHtml(exerciseTitle) + '</strong><small>' + kindLbl + '</small></span>' +
+        '<span class="ex-go" aria-hidden="true">' + svgIcon('chevron-left') + '</span>';
       btn.addEventListener('click', function () {
         if (type === 'video' && document.getElementById('vpBox')) {
           /* تمرين فيديو → نشغّله في المشغل الرئيسي */
