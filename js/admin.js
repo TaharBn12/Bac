@@ -72,7 +72,8 @@ function showApp() {
 
     updateCloudBadge();
 
-    /* رابط مباشر لدرس معين: admin.html?lesson=xxx */
+    /* رابط مباشر لتبويب معين مثل admin.html?tab=ai أو درس admin.html?lesson=xxx */
+    var requestedTab = param('tab');
     var lessonId = param('lesson');
     if (lessonId && getLesson(data, lessonId)) {
       var path = lessonPath(data, lessonId);
@@ -89,7 +90,11 @@ function showApp() {
       if (u0) sel.unit = u0.id;
       var l0 = u0 ? lessonsOf(data, u0.id)[0] : null;
       if (l0) sel.lesson = l0.id;
+      if (requestedTab && $('[data-tab="' + requestedTab + '"]')) {
+        currentTab = requestedTab;
+      }
     }
+    $all('.tab').forEach(function (x) { x.classList.toggle('active', x.dataset.tab === currentTab); });
 
     $('#tabsNav').addEventListener('click', function (e) {
       var t = e.target.closest('.tab');
@@ -408,6 +413,7 @@ function duplicateSubject(id) {
 function renderPanel() {
   var p = $('#panel');
   if (currentTab === 'subjects') renderSubjectsPanel(p);
+  else if (currentTab === 'ai' && typeof renderAiPanel === 'function') renderAiPanel(p);
   else if (currentTab === 'organizer') renderOrganizerPanel(p);
   else if (currentTab === 'units') renderUnitsPanel(p);
   else if (currentTab === 'lessons') renderLessonsPanel(p);
