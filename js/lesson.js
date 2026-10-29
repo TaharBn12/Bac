@@ -321,13 +321,40 @@ function initLessonPage() {
     return player;
   }
 
-  /* ---- الفيديوهات ---- */
+  /* ---- الفيديوهات (مع دعم المجموعات الديناميكية: عنوان + فيديو أو عدة فيديوهات) ---- */
   if (videos.length) {
     ensurePlayer();
-    tabsEl.innerHTML = videos.map(function (v, i) {
-      return '<button class="vtab' + (i === 0 ? ' active' : '') + '" data-i="' + i + '">' +
-        escapeHtml((i + 1) + '. ' + (v.title || 'فيديو')) + '</button>';
-    }).join('');
+    var vGroups = typeof groupResources === 'function' ? groupResources(videos) : [{ isExplicit: false, title: '', items: videos }];
+    var showGroupedVideos = vGroups.some(function (g) { return g.isExplicit && g.items.length > 1; }) ||
+      (vGroups.length > 1 && vGroups.some(function (g) { return g.isExplicit; }));
+
+    if (showGroupedVideos) {
+      tabsEl.classList.add('video-tabs-grouped');
+      var flatVidIdx = 0;
+      tabsEl.innerHTML = vGroups.map(function (vg, gIdx) {
+        var gTitle = vg.title || ('الفقرة ' + (gIdx + 1));
+        var btns = vg.items.map(function (v, subIdx) {
+          var curIdx = flatVidIdx++;
+          var lbl = vg.items.length > 1
+            ? ('الجزء ' + (subIdx + 1) + (v.title && v.title !== gTitle && v.title !== (gTitle + ' (' + (subIdx + 1) + ')') ? ' — ' + v.title : ''))
+            : (v.title || gTitle || 'تشغيل الفيديو');
+          return '<button class="vtab' + (curIdx === 0 ? ' active' : '') + '" data-i="' + curIdx + '">' +
+            svgIcon('play') + ' ' + escapeHtml(lbl) + '</button>';
+        }).join('');
+        return '<div class="video-group-block">' +
+          '<div class="video-group-title"><span class="vg-num">' + (gIdx + 1) + '</span>' + escapeHtml(gTitle) +
+            (vg.items.length > 1 ? ' <small>(' + vg.items.length + ' فيديوهات)</small>' : '') +
+          '</div>' +
+          '<div class="video-group-btns">' + btns + '</div>' +
+        '</div>';
+      }).join('');
+    } else {
+      tabsEl.classList.remove('video-tabs-grouped');
+      tabsEl.innerHTML = videos.map(function (v, i) {
+        return '<button class="vtab' + (i === 0 ? ' active' : '') + '" data-i="' + i + '">' +
+          escapeHtml((i + 1) + '. ' + (v.groupTitle || v.title || 'فيديو')) + '</button>';
+      }).join('');
+    }
 
     tabsEl.addEventListener('click', function (e) {
       var btn = e.target.closest('.vtab');
@@ -350,18 +377,20 @@ function initLessonPage() {
       '</div></div>';
   }
 
-  /* ---- ملفات PDF ---- */
+  /* ---- ملفات PDF (مع دعم العناوين الديناميكية وملف أو عدة ملفات تحت كل عنوان) ---- */
   var pdfEl = $('#pdfGrid');
   if (pdfs.length) {
     var pdfKindLabel = isExPage ? 'ملف التمرين PDF' : 'ملخص PDF';
-    pdfs.forEach(function (p) {
+    var pdfGroups = typeof groupResources === 'function' ? groupResources(pdfs) : [{ isExplicit: false, title: '', items: pdfs }];
+    var showGroupedPdfs = pdfGroups.some(function (g) { return g.items.length > 1; }) ||
+      (pdfGroups.length > 1 && pdfGroups.some(function (g) { return g.isExplicit; }));
+
+    function hydratePdfSlot(slotEl, p, fallbackTitle) {
       resolveSrc(p.url).then(function (res) {
-        if (res.kind === 'error') return;
-        var card = document.createElement('article');
-        var summaryName = p.title || res.fileName || pdfKindLabel;
-        card.className = 'pdf-card';
-        /* لا نعرض الرابط إطلاقاً: الاسم الذي يضعه المدير هو النص الوحيد الظاهر. */
-        card.innerHTML =
+        if (res.kind === 'error') { slotEl.remove(); return; }
+        var summaryName = p.title || fallbackTitle || res.fileName || pdfKindLabel;
+        slotEl.className = 'pdf-card';
+        slotEl.innerHTML =
           '<div class="pdf-ico">' + svgIcon('file') + '</div>' +
           '<div class="pdf-copy"><div class="t" title="' + escapeHtml(summaryName) + '">' + escapeHtml(summaryName) + '</div>' +
             '<span class="pdf-kind">' + pdfKindLabel + '</span></div>' +
@@ -369,18 +398,50 @@ function initLessonPage() {
             '<a class="btn btn-icon" target="_blank" rel="noopener" href="' + escapeHtml(res.src) + '" title="مشاهدة الملف" aria-label="مشاهدة ' + escapeHtml(summaryName) + '">' + svgIcon('eye') + '</a>' +
             '<a class="btn btn-icon" download="' + escapeHtml(res.fileName || summaryName + '.pdf') + '" href="' + escapeHtml(res.src) + '" title="تنزيل الملف" aria-label="تنزيل ' + escapeHtml(summaryName) + '">' + svgIcon('download') + '</a>' +
           '</div>';
-        pdfEl.appendChild(card);
       });
-    });
+    }
+
+    if (showGroupedPdfs) {
+      pdfEl.className = 'media-groups-stack';
+      pdfGroups.forEach(function (pg, gIdx) {
+        var gTitle = pg.title || (pdfKindLabel + ' ' + (gIdx + 1));
+        var gCard = document.createElement('div');
+        gCard.className = 'media-group-card';
+        gCard.innerHTML =
+          '<div class="media-group-head">' +
+            '<div class="media-group-title"><span class="mg-num">' + (gIdx + 1) + '</span><h3>' + escapeHtml(gTitle) + '</h3></div>' +
+            (pg.items.length > 1 ? '<span class="badge on">' + svgIcon('file') + ' ' + pg.items.length + ' ملفات PDF</span>' : '') +
+          '</div>' +
+          '<div class="pdf-grid"></div>';
+        var innerGrid = gCard.querySelector('.pdf-grid');
+        pg.items.forEach(function (p, subIdx) {
+          var slot = document.createElement('article');
+          slot.className = 'pdf-card pdf-card-loading';
+          innerGrid.appendChild(slot);
+          var dispTitle = pg.items.length > 1
+            ? (p.title && p.title !== gTitle ? p.title : (gTitle + ' — ملف ' + (subIdx + 1)))
+            : gTitle;
+          hydratePdfSlot(slot, p, dispTitle);
+        });
+        pdfEl.appendChild(gCard);
+      });
+    } else {
+      pdfs.forEach(function (p) {
+        var slot = document.createElement('article');
+        slot.className = 'pdf-card pdf-card-loading';
+        pdfEl.appendChild(slot);
+        hydratePdfSlot(slot, p, p.groupTitle || p.title);
+      });
+    }
   } else {
     $('#pdfSection').style.display = 'none';
   }
 
-  /* ---- عارض الصور الموحّد (لصور المعرض + تمارين الصور) ---- */
+  /* ---- عارض الصور الموحّد (يدعم التنقل بين صور المعرض أو صور أي تمرين متعدد الصور) ---- */
   var galEl = $('#imgGallery');
   var lb = $('#lightbox');
   var lbImg = $('#lbImg'), lbCap = $('#lbCap');
-  var resolvedImages = [];
+  var activeLightboxItems = [];
   var lightboxBound = false;
 
   function bindLightboxControls() {
@@ -390,110 +451,250 @@ function initLessonPage() {
     lb.addEventListener('click', function (e) { if (e.target === lb) lb.classList.remove('open'); });
     $('#lbPrev').addEventListener('click', function (e) {
       e.stopPropagation();
-      if (!resolvedImages.length) return;
-      var i = (+lb.dataset.i - 1 + resolvedImages.length) % resolvedImages.length;
-      openLightboxAt(i);
+      var valid = activeLightboxItems.filter(Boolean);
+      if (valid.length <= 1) return;
+      var i = (+lb.dataset.i - 1 + valid.length) % valid.length;
+      showLightboxIndex(valid, i);
     });
     $('#lbNext').addEventListener('click', function (e) {
       e.stopPropagation();
-      if (!resolvedImages.length) return;
-      var i = (+lb.dataset.i + 1) % resolvedImages.length;
-      openLightboxAt(i);
+      var valid = activeLightboxItems.filter(Boolean);
+      if (valid.length <= 1) return;
+      var i = (+lb.dataset.i + 1) % valid.length;
+      showLightboxIndex(valid, i);
     });
     document.addEventListener('keydown', function (e) {
       if (!lb.classList.contains('open')) return;
       if (e.key === 'Escape') lb.classList.remove('open');
-      if (e.key === 'ArrowLeft' && resolvedImages.length > 1) $('#lbPrev').click();
-      if (e.key === 'ArrowRight' && resolvedImages.length > 1) $('#lbNext').click();
+      if (e.key === 'ArrowLeft') $('#lbPrev').click();
+      if (e.key === 'ArrowRight') $('#lbNext').click();
     });
   }
 
-  function openLightboxAt(i) {
-    if (!resolvedImages[i]) return;
+  function showLightboxIndex(validList, idx) {
+    if (!validList[idx]) return;
     bindLightboxControls();
-    lbImg.src = resolvedImages[i].src;
-    lbCap.textContent = resolvedImages[i].title;
-    lb.dataset.i = i;
-    $('#lbPrev').hidden = resolvedImages.length <= 1;
-    $('#lbNext').hidden = resolvedImages.length <= 1;
+    activeLightboxItems = validList;
+    lbImg.src = validList[idx].src;
+    lbCap.textContent = validList[idx].title || '';
+    lb.dataset.i = String(idx);
+    $('#lbPrev').hidden = validList.length <= 1;
+    $('#lbNext').hidden = validList.length <= 1;
     lb.classList.add('open');
   }
 
-  function openSingleImageInLightbox(src, title) {
-    bindLightboxControls();
-    lbImg.src = src;
-    lbCap.textContent = title || '';
-    lb.dataset.i = '0';
-    $('#lbPrev').hidden = true;
-    $('#lbNext').hidden = true;
-    lb.classList.add('open');
+  function openLightboxForSlot(slotsArray, targetSlotIdx) {
+    var valid = [];
+    var mappedIndex = 0;
+    slotsArray.forEach(function (entry, sIdx) {
+      if (entry && entry.src) {
+        if (sIdx === targetSlotIdx) mappedIndex = valid.length;
+        valid.push(entry);
+      }
+    });
+    if (valid.length) showLightboxIndex(valid, mappedIndex);
   }
 
+  /* ---- الصور (مع دعم الفقرات الديناميكية: عنوان + صورة أو عدة صور، ثم عنوان + صورة أو عدة صور...) ---- */
   if (images.length) {
-    images.forEach(function (img) {
-      resolveSrc(img.url).then(function (res) {
-        if (res.kind === 'error') return;
-        var idx = resolvedImages.length;
-        resolvedImages.push({ src: res.src, title: img.title || res.fileName || 'صورة' });
+    var imgGroups = typeof groupResources === 'function' ? groupResources(images) : [{ isExplicit: false, title: '', items: images }];
+    var mainImageSlots = new Array(images.length);
+    var defaultStackMode = isExPage;
+
+    /* شريط تبديل طريقة عرض الصور (صفحات كبيرة متتابعة واضحة للحلول أو شبكة مصغّرة) */
+    var imgSecHead = $('#imgSection > h2');
+    if (imgSecHead && imgSecHead.parentNode) {
+      var headBar = document.createElement('div');
+      headBar.className = 'sec-head-bar';
+      imgSecHead.parentNode.insertBefore(headBar, imgSecHead);
+      headBar.appendChild(imgSecHead);
+
+      var modeSwitch = document.createElement('div');
+      modeSwitch.className = 'img-mode-switch';
+      modeSwitch.innerHTML =
+        '<button type="button" class="img-mode-btn' + (defaultStackMode ? ' active' : '') + '" data-imode="stack">' +
+          svgIcon('layers') + ' صفحات واضحة</button>' +
+        '<button type="button" class="img-mode-btn' + (!defaultStackMode ? ' active' : '') + '" data-imode="grid">' +
+          svgIcon('image') + ' شبكة</button>';
+      headBar.appendChild(modeSwitch);
+
+      modeSwitch.addEventListener('click', function (e) {
+        var b = e.target.closest('[data-imode]');
+        if (!b) return;
+        var isStack = b.dataset.imode === 'stack';
+        $all('.img-mode-btn', modeSwitch).forEach(function (x) { x.classList.toggle('active', x === b); });
+        galEl.classList.toggle('img-view-stack', isStack);
+      });
+    }
+
+    galEl.className = 'media-groups-stack' + (defaultStackMode ? ' img-view-stack' : '');
+    var globalImgCursor = 0;
+
+    imgGroups.forEach(function (ig, gIdx) {
+      var gTitle = ig.title || (isExPage ? 'فقرة الصور ' + (gIdx + 1) : 'صورة ' + (gIdx + 1));
+      var gCard = document.createElement('div');
+      gCard.className = 'media-group-card';
+      gCard.innerHTML =
+        '<div class="media-group-head">' +
+          '<div class="media-group-title"><span class="mg-num">' + (gIdx + 1) + '</span><h3>' + escapeHtml(gTitle) + '</h3></div>' +
+          '<span class="badge' + (ig.items.length > 1 ? ' on' : '') + '">' + svgIcon('image') + ' ' +
+            (ig.items.length === 1 ? 'صورة واحدة' : (ig.items.length === 2 ? 'صورتان' : ig.items.length + ' صور')) +
+          '</span>' +
+        '</div>' +
+        '<div class="img-gallery"></div>';
+
+      var innerGal = gCard.querySelector('.img-gallery');
+
+      ig.items.forEach(function (img, subIdx) {
+        var slotIdx = globalImgCursor++;
+        var stepText = ig.items.length > 1 ? ('صورة ' + (subIdx + 1) + ' من ' + ig.items.length) : '';
+        var lbCaption = gTitle + (stepText ? ' — ' + stepText : '');
 
         var thumb = document.createElement('div');
         thumb.className = 'img-thumb';
-        thumb.innerHTML = '<img alt="' + escapeHtml(img.title || 'صورة') + '" loading="lazy">' +
-          '<div class="cap">' + escapeHtml(img.title || '') + '</div>';
-        var im = thumb.querySelector('img');
-        im.onerror = function () {
-          im.style.display = 'none';
-          thumb.style.background = 'linear-gradient(135deg, #7c5cff33, #f5c54222)';
-          thumb.style.display = 'grid'; thumb.style.placeItems = 'center';
-          thumb.insertAdjacentHTML('afterbegin', svgIcon('image'));
-          thumb.querySelector('.ic').style.cssText = 'width:34px;height:34px;opacity:.55';
-        };
-        im.src = res.src;
-        thumb.addEventListener('click', function () { openLightboxAt(idx); });
-        galEl.appendChild(thumb);
+        thumb.innerHTML =
+          (ig.items.length > 1 ? '<span class="img-step-badge">' + (subIdx + 1) + ' / ' + ig.items.length + '</span>' : '') +
+          '<img alt="' + escapeHtml(lbCaption) + '" loading="lazy">' +
+          '<div class="cap">' + escapeHtml(stepText || gTitle) + '</div>';
+        innerGal.appendChild(thumb);
+
+        resolveSrc(img.url).then(function (res) {
+          if (res.kind === 'error') { thumb.remove(); return; }
+          mainImageSlots[slotIdx] = { src: res.src, title: lbCaption };
+          var im = thumb.querySelector('img');
+          im.onerror = function () {
+            im.style.display = 'none';
+            thumb.style.background = 'linear-gradient(135deg, #7c5cff33, #f5c54222)';
+            thumb.style.display = 'grid'; thumb.style.placeItems = 'center';
+            thumb.insertAdjacentHTML('afterbegin', svgIcon('image'));
+            thumb.querySelector('.ic').style.cssText = 'width:34px;height:34px;opacity:.55';
+          };
+          im.src = res.src;
+          thumb.addEventListener('click', function () {
+            openLightboxForSlot(mainImageSlots, slotIdx);
+          });
+        });
       });
+
+      galEl.appendChild(gCard);
     });
   } else {
     $('#imgSection').style.display = 'none';
   }
 
-  /* ---- التمارين المرفقة بالدرس ---- */
+  /* ---- التمارين المرفقة بالدرس (مع دعم عنوان + صورة أو عدة صور / فيديو / PDF) ---- */
   var exEl = $('#exBtns');
   if (exs.length) {
-    exs.forEach(function (ex) {
-      var type = ex.exerciseType || 'link';
-      var btn = document.createElement('button');
-      var exerciseTitle = ex.title || 'تمرين';
-      btn.type = 'button';
-      btn.className = 'ex-btn ex-' + type;
-      btn.setAttribute('aria-label', 'فتح ' + exerciseTitle);
-      var ico = svgIcon(type === 'video' ? 'film' : (type === 'pdf' ? 'file' : (type === 'image' ? 'image' : 'link')));
-      var kindLbl = type === 'video' ? 'فيديو تطبيقي'
-        : (type === 'pdf' ? 'تمرين PDF' : (type === 'image' ? 'تمرين مصوّر' : 'رابط تطبيقي'));
-      btn.innerHTML = '<span class="ex-icon">' + ico + '</span>' +
-        '<span class="ex-copy"><strong>' + escapeHtml(exerciseTitle) + '</strong><small>' + kindLbl + '</small></span>' +
-        '<span class="ex-go" aria-hidden="true">' + svgIcon('chevron-left') + '</span>';
-      btn.addEventListener('click', function () {
-        if (type === 'video') {
-          /* تمرين فيديو → نشغّله في المشغل الرئيسي */
-          var p = ensurePlayer();
-          p.load({ title: ex.title || 'تمرين', url: ex.url });
-          $all('.vtab', tabsEl).forEach(function (t) { t.classList.remove('active'); });
-          shellEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        } else if (type === 'image') {
-          resolveSrc(ex.url).then(function (res) {
-            if (res.kind === 'error') { toast(res.message, 'err'); return; }
-            openSingleImageInLightbox(res.src, exerciseTitle);
+    var exGroups = typeof groupResources === 'function' ? groupResources(exs) : exs.map(function (x) { return { isExplicit: false, title: x.title, exerciseType: x.exerciseType, items: [x] }; });
+    var hasMultiExGroups = exGroups.some(function (g) { return g.items.length > 1 || (g.isExplicit && (g.exerciseType || g.items[0].exerciseType) === 'image'); });
+    if (hasMultiExGroups) exEl.classList.add('ex-groups-mixed');
+
+    exGroups.forEach(function (eg, gIdx) {
+      var type = eg.exerciseType || (eg.items[0] && eg.items[0].exerciseType) || 'link';
+      var gTitle = eg.title || (eg.items[0] && eg.items[0].title) || ('تمرين ' + (gIdx + 1));
+
+      /* حالة تمرين مصوّر يحتوي عدة صور (أو مجموعة صور ديناميكية) */
+      if (type === 'image' && (eg.items.length > 1 || eg.isExplicit)) {
+        var exImgSlots = new Array(eg.items.length);
+        var exCard = document.createElement('div');
+        exCard.className = 'media-group-card ex-inline-group';
+        exCard.innerHTML =
+          '<div class="media-group-head">' +
+            '<div class="media-group-title"><span class="mg-num">' + (gIdx + 1) + '</span><h3>' + escapeHtml(gTitle) + '</h3></div>' +
+            '<div style="display:flex;align-items:center;gap:8px">' +
+              '<span class="badge on">' + svgIcon('image') + ' ' +
+                (eg.items.length === 1 ? 'صورة واحدة' : (eg.items.length === 2 ? 'صورتان' : eg.items.length + ' صور')) +
+              '</span>' +
+              '<button type="button" class="btn btn-sm ex-open-gal-btn">' + svgIcon('eye') + ' عرض مكبّر</button>' +
+            '</div>' +
+          '</div>' +
+          '<div class="img-gallery"></div>';
+
+        var exGal = exCard.querySelector('.img-gallery');
+        eg.items.forEach(function (exItem, sIdx) {
+          var stepLbl = eg.items.length > 1 ? ('صورة ' + (sIdx + 1) + ' من ' + eg.items.length) : gTitle;
+          var capTxt = gTitle + (eg.items.length > 1 ? ' — ' + stepLbl : '');
+          var th = document.createElement('div');
+          th.className = 'img-thumb';
+          th.innerHTML =
+            (eg.items.length > 1 ? '<span class="img-step-badge">' + (sIdx + 1) + ' / ' + eg.items.length + '</span>' : '') +
+            '<img alt="' + escapeHtml(capTxt) + '" loading="lazy">' +
+            '<div class="cap">' + escapeHtml(stepLbl) + '</div>';
+          exGal.appendChild(th);
+
+          resolveSrc(exItem.url).then(function (res) {
+            if (res.kind === 'error') { th.remove(); return; }
+            exImgSlots[sIdx] = { src: res.src, title: capTxt };
+            var im = th.querySelector('img');
+            im.src = res.src;
+            th.addEventListener('click', function () {
+              openLightboxForSlot(exImgSlots, sIdx);
+            });
           });
-        } else {
-          resolveSrc(ex.url).then(function (res) {
-            if (res.kind === 'error') { toast(res.message, 'err'); return; }
-            if (res.kind === 'youtube') { window.open('https://www.youtube.com/watch?v=' + res.id, '_blank'); return; }
-            window.open(res.src, '_blank');
-          });
-        }
-      });
-      exEl.appendChild(btn);
+        });
+
+        exCard.querySelector('.ex-open-gal-btn').addEventListener('click', function () {
+          openLightboxForSlot(exImgSlots, 0);
+        });
+
+        exEl.appendChild(exCard);
+        return;
+      }
+
+      /* دالة إنشاء زر تمرين مفرد */
+      function makeExBtn(ex, customLabel) {
+        var itemType = ex.exerciseType || type || 'link';
+        var btn = document.createElement('button');
+        var exerciseTitle = customLabel || ex.title || gTitle || 'تمرين';
+        btn.type = 'button';
+        btn.className = 'ex-btn ex-' + itemType;
+        btn.setAttribute('aria-label', 'فتح ' + exerciseTitle);
+        var ico = svgIcon(itemType === 'video' ? 'film' : (itemType === 'pdf' ? 'file' : (itemType === 'image' ? 'image' : 'link')));
+        var kindLbl = itemType === 'video' ? 'فيديو تطبيقي'
+          : (itemType === 'pdf' ? 'تمرين PDF' : (itemType === 'image' ? 'تمرين مصوّر' : 'رابط تطبيقي'));
+        btn.innerHTML = '<span class="ex-icon">' + ico + '</span>' +
+          '<span class="ex-copy"><strong>' + escapeHtml(exerciseTitle) + '</strong><small>' + kindLbl + '</small></span>' +
+          '<span class="ex-go" aria-hidden="true">' + svgIcon('chevron-left') + '</span>';
+        btn.addEventListener('click', function () {
+          if (itemType === 'video') {
+            var p = ensurePlayer();
+            p.load({ title: exerciseTitle, url: ex.url });
+            $all('.vtab', tabsEl).forEach(function (t) { t.classList.remove('active'); });
+            shellEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          } else if (itemType === 'image') {
+            resolveSrc(ex.url).then(function (res) {
+              if (res.kind === 'error') { toast(res.message, 'err'); return; }
+              showLightboxIndex([{ src: res.src, title: exerciseTitle }], 0);
+            });
+          } else {
+            resolveSrc(ex.url).then(function (res) {
+              if (res.kind === 'error') { toast(res.message, 'err'); return; }
+              if (res.kind === 'youtube') { window.open('https://www.youtube.com/watch?v=' + res.id, '_blank'); return; }
+              window.open(res.src, '_blank');
+            });
+          }
+        });
+        return btn;
+      }
+
+      if (eg.items.length > 1) {
+        var multiCard = document.createElement('div');
+        multiCard.className = 'media-group-card ex-inline-group';
+        multiCard.innerHTML =
+          '<div class="media-group-head">' +
+            '<div class="media-group-title"><span class="mg-num">' + (gIdx + 1) + '</span><h3>' + escapeHtml(gTitle) + '</h3></div>' +
+            '<span class="badge on">' + eg.items.length + ' عناصر</span>' +
+          '</div>' +
+          '<div class="ex-btns"></div>';
+        var innerBtns = multiCard.querySelector('.ex-btns');
+        eg.items.forEach(function (exItem, sIdx) {
+          var subLbl = (exItem.title && exItem.title !== gTitle) ? exItem.title : (gTitle + ' (' + (sIdx + 1) + ')');
+          innerBtns.appendChild(makeExBtn(exItem, subLbl));
+        });
+        exEl.appendChild(multiCard);
+      } else {
+        exEl.appendChild(makeExBtn(eg.items[0], gTitle));
+      }
     });
   } else {
     $('#exSection').style.display = 'none';

@@ -392,39 +392,70 @@ function openEditDialog(opts) {
 /* ============ نسخ العناصر ============ */
 /* النسخ يحتفظ بالمراجع إلى الملفات نفسها ولا يعيد رفعها، لذلك هو سريع ولا يستهلك مساحة إضافية. */
 function copyResourcesToLesson(sourceLessonId, targetLessonId) {
+  var groupMap = {};
   resourcesOf(data, sourceLessonId).forEach(function (r) {
+    var mappedGroupId;
+    if (r.groupId) {
+      if (!groupMap[r.groupId]) groupMap[r.groupId] = uid('g');
+      mappedGroupId = groupMap[r.groupId];
+    }
     data.resources.push({
       id: uid('r'), lessonId: targetLessonId, kind: r.kind,
       title: r.title || '', url: r.url, size: r.size || undefined,
-      exerciseType: r.exerciseType || undefined, order: r.order || 1
+      exerciseType: r.exerciseType || undefined,
+      groupId: mappedGroupId,
+      groupTitle: r.groupTitle || undefined,
+      order: r.order || 1
     });
   });
 }
 
-/* نسخ مورد واحد إلى قائمة دروس أو تمارين مستهدفة دون تكرار إذا كان المورد موجوداً فيها مسبقاً. */
-function copySingleResourceToTargets(resource, targets) {
-  var added = 0, skipped = 0;
+/* نسخ مورد واحد أو مجموعة موارد كاملة (عنوان + عدة صور/ملفات) إلى قائمة دروس/تمارين مستهدفة دون تكرار. */
+function copyResourcesBundleToTargets(sourceItems, targets) {
+  var itemsList = Array.isArray(sourceItems) ? sourceItems : (sourceItems ? [sourceItems] : []);
+  if (!itemsList.length) return { added: 0, targetsUpdated: 0, skipped: 0 };
+  var added = 0, targetsUpdated = 0, skipped = 0;
+
   (targets || []).forEach(function (t) {
-    if (!t || !t.id || t.id === resource.lessonId) return;
-    var existing = resourcesOf(data, t.id, resource.kind);
-    var already = existing.some(function (x) {
-      return x.url === resource.url && (resource.kind !== 'exercise' || (x.exerciseType || '') === (resource.exerciseType || ''));
+    if (!t || !t.id) return;
+    var groupMap = {};
+    var targetTouched = false;
+    itemsList.forEach(function (src) {
+      if (!src || t.id === src.lessonId) return;
+      var existing = resourcesOf(data, t.id, src.kind);
+      var already = existing.some(function (x) {
+        return x.url === src.url && (src.kind !== 'exercise' || (x.exerciseType || '') === (src.exerciseType || ''));
+      });
+      if (already) { skipped++; return; }
+      var maxOrder = existing.reduce(function (m, r) { return Math.max(m, r.order || 0); }, 0);
+      var mappedGroupId;
+      if (src.groupId) {
+        if (!groupMap[src.groupId]) groupMap[src.groupId] = uid('g');
+        mappedGroupId = groupMap[src.groupId];
+      }
+      data.resources.push({
+        id: uid('r'),
+        lessonId: t.id,
+        kind: src.kind,
+        title: src.title || '',
+        url: src.url,
+        size: src.size || undefined,
+        exerciseType: src.exerciseType || undefined,
+        groupId: mappedGroupId,
+        groupTitle: src.groupTitle || undefined,
+        order: maxOrder + 1
+      });
+      added++;
+      targetTouched = true;
     });
-    if (already) { skipped++; return; }
-    var maxOrder = existing.reduce(function (m, r) { return Math.max(m, r.order || 0); }, 0);
-    data.resources.push({
-      id: uid('r'),
-      lessonId: t.id,
-      kind: resource.kind,
-      title: resource.title || '',
-      url: resource.url,
-      size: resource.size || undefined,
-      exerciseType: resource.exerciseType || undefined,
-      order: maxOrder + 1
-    });
-    added++;
+    if (targetTouched) targetsUpdated++;
   });
-  return { added: added, skipped: skipped };
+  return { added: added, targetsUpdated: targetsUpdated, skipped: skipped };
+}
+
+function copySingleResourceToTargets(resource, targets) {
+  var r = copyResourcesBundleToTargets([resource], targets);
+  return { added: r.targetsUpdated, skipped: r.skipped };
 }
 
 function duplicateLesson(id, targetUnitId) {
@@ -1191,7 +1222,7 @@ function renderExercisesPanel(p) {
       '<div class="ex-editor-title">' +
         svgIcon('sparkles') +
         '<div><strong>إضافة المحتوى للتمرين: ' + escapeHtml(activeExercise.title) + '</strong>' +
-        '<small>أضف فيديو الحل أو الموضوع، ملفات PDF، أو صور التمرين والحل</small></div>' +
+        '<small>يمكنك إضافة عنوان مع فيديو/صورة/PDF أو عدة صور وملفات تحت نفس العنوان، ثم إضافة عنوان جديد تحته بشكل ديناميكي</small></div>' +
       '</div>' +
       '<div class="ex-editor-acts">' +
         (exList.length > 1 ? '<select class="inp" id="exQuickSwitch" style="width:auto;min-width:190px">' + unitExerciseOptions(sel.unit, activeExercise.id) + '</select>' : '') +
@@ -1223,7 +1254,7 @@ function renderContentPanel(p) {
 
   p.innerHTML =
     '<h2>' + svgIcon('plus') + ' محتوى الدرس والتمارين</h2>' +
-    '<p class="hint">اختر المادة ← الوحدة ← الدرس، ثم أضف الفيديوهات والملخصات والصور والتمارين. يمكنك نسخ أي ملخص أو تمرين إلى <b>جميع الدروس داخل الوحدة</b> مباشرة عند الإضافة أو بنقرة واحدة من القائمة.</p>' +
+    '<p class="hint">اختر المادة ← الوحدة ← الدرس، ثم أضف الفقرات والمجموعات الديناميكية (عنوان + فيديو/ملف/صورة أو عدة صور، ثم عنوان آخر تحته...). ويمكنك نسخ أي مجموعة إلى <b>جميع الدروس داخل الوحدة</b> بنقرة واحدة.</p>' +
 
     '<div class="frm-card">' +
       '<div class="frm-row">' +
@@ -1256,111 +1287,917 @@ function renderContentPanel(p) {
   renderResourceSections($('#resArea'), lesson, { exerciseItemMode: false });
 }
 
+/* ============================================================
+   منشئ المجموعات الديناميكي (عنوان + عنصر أو عدة عناصر، يليه عنوان آخر...)
+   يعمل لكل من: الفيديو، ملفات PDF، الصور، والتمارين المرفقة بالدرس
+   ============================================================ */
+var composerDrafts = {};
+
+function makeComposerBlock(kind) {
+  return {
+    id: uid('blk'),
+    title: '',
+    exerciseType: kind === 'exercise' ? 'image' : '',
+    files: [], /* [{ id, file, previewUrl }] */
+    urls: ['']
+  };
+}
+
+function revokeDraftBlockPreviews(blk) {
+  if (!blk || !Array.isArray(blk.files)) return;
+  blk.files.forEach(function (f) {
+    if (f && f.previewUrl) {
+      try { URL.revokeObjectURL(f.previewUrl); } catch (e) { /* تجاهل */ }
+    }
+  });
+}
+
+function getComposerDraft(lessonId, kind) {
+  var key = lessonId + ':' + kind;
+  if (!composerDrafts[key]) {
+    composerDrafts[key] = {
+      blocks: [makeComposerBlock(kind)],
+      copyAllLessons: false,
+      copyAllEx: false,
+      saving: false,
+      progressText: ''
+    };
+  }
+  return composerDrafts[key];
+}
+
+function resetComposerDraft(lessonId, kind) {
+  var key = lessonId + ':' + kind;
+  if (composerDrafts[key] && composerDrafts[key].blocks) {
+    composerDrafts[key].blocks.forEach(revokeDraftBlockPreviews);
+  }
+  composerDrafts[key] = {
+    blocks: [makeComposerBlock(kind)],
+    copyAllLessons: false,
+    copyAllEx: false,
+    saving: false,
+    progressText: ''
+  };
+}
+
+function getSectionConfig(kind, exMode) {
+  if (kind === 'video') {
+    return {
+      kind: 'video',
+      heading: exMode ? 'فيديوهات التمرين والحل' : 'الفيديوهات',
+      accept: 'video/*',
+      titlePlaceholder: exMode ? 'عنوان الفقرة (مثال: شرح التمرين / الطريقة الثانية للحل)' : 'عنوان الفقرة أو الفيديو (مثال: شرح الدرس / أمثلة تطبيقية)',
+      urlPlaceholder: 'رابط الفيديو (يوتيوب أو رابط مباشر MP4/WebM)',
+      uploadBtnLabel: 'اختيار فيديو أو عدة فيديوهات',
+      addBlockLabel: 'إضافة عنوان جديد + فيديو أو عدة فيديوهات',
+      itemNounPlural: 'فيديوهات'
+    };
+  }
+  if (kind === 'pdf') {
+    return {
+      kind: 'pdf',
+      heading: exMode ? 'ملفات التمرين والحل PDF' : 'ملفات وملخصات PDF',
+      accept: 'application/pdf,.pdf',
+      titlePlaceholder: exMode ? 'عنوان الفقرة (مثال: موضوع التمرين / الحل النموذجي PDF)' : 'عنوان الملخص أو المجموعة (مثال: ملخص شامل للوحدة)',
+      urlPlaceholder: 'رابط ملف PDF (https://...)',
+      uploadBtnLabel: 'اختيار ملف PDF أو عدة ملفات',
+      addBlockLabel: 'إضافة عنوان جديد + ملف أو عدة ملفات PDF',
+      itemNounPlural: 'ملفات PDF'
+    };
+  }
+  if (kind === 'image') {
+    return {
+      kind: 'image',
+      heading: exMode ? 'صور التمرين والحل' : 'الصور التوضيحية',
+      accept: 'image/*',
+      titlePlaceholder: exMode ? 'عنوان الفقرة (مثال: نص التمرين / حل الجزء الأول / حل الجزء الثاني)' : 'عنوان مجموعة الصور (مثال: مخططات الدرس / أمثلة محلولة)',
+      urlPlaceholder: 'رابط الصورة (https://...)',
+      uploadBtnLabel: 'اختيار صورة أو عدة صور معاً',
+      addBlockLabel: 'إضافة عنوان جديد + صورة أو عدة صور أخرى',
+      itemNounPlural: 'صور'
+    };
+  }
+  return {
+    kind: 'exercise',
+    heading: 'التمارين المرفقة بالدرس',
+    accept: 'image/*,video/*,application/pdf,.pdf',
+    titlePlaceholder: 'عنوان التمرين أو الحل (مثال: حل التمرين الأول / سلسلة تطبيقية)',
+    urlPlaceholder: 'الرابط (يوتيوب / صورة / PDF / موقع)',
+    uploadBtnLabel: 'اختيار ملف أو عدة ملفات (صور / فيديو / PDF)',
+    addBlockLabel: 'إضافة عنوان تمرين جديد + ملفاته أو صوره',
+    itemNounPlural: 'عناصر'
+  };
+}
+
 function renderResourceSections(area, lesson, opts) {
   opts = opts || {};
   var exMode = !!opts.exerciseItemMode;
-  pickedFiles = {}; /* تصفير الملفات المختارة عند كل إعادة رسم */
+  var kindsList = exMode ? ['video', 'pdf', 'image'] : ['video', 'pdf', 'image', 'exercise'];
 
-  if (exMode) {
-    /* وضع التمرين المستقل: فيديو + PDF + صور */
-    area.innerHTML =
-      resSectionHTML(lesson, 'video', 'فيديوهات التمرين والحل', 'video/*', 'رابط الفيديو (MP4/WebM/OGG أو رابط يوتيوب)', exMode) +
-      resSectionHTML(lesson, 'pdf', 'ملفات التمرين والحل PDF', 'application/pdf,.pdf', 'رابط ملف PDF (https://...)', exMode) +
-      resSectionHTML(lesson, 'image', 'صور التمرين والحل', 'image/*', 'رابط الصورة (https://...)', exMode);
-  } else {
-    area.innerHTML =
-      resSectionHTML(lesson, 'video', 'الفيديوهات', 'video/*', 'رابط الفيديو (MP4/WebM/OGG أو رابط يوتيوب)', false) +
-      resSectionHTML(lesson, 'pdf', 'ملفات وملخصات PDF', 'application/pdf,.pdf', 'رابط ملف PDF (https://...)', false) +
-      resSectionHTML(lesson, 'image', 'الصور التوضيحية', 'image/*', 'رابط الصورة (https://...)', false) +
-      exSectionHTML(lesson);
+  area.innerHTML = kindsList.map(function (kind) {
+    var cfg = getSectionConfig(kind, exMode);
+    var items = resourcesOf(data, lesson.id, kind);
+    var groups = groupResources(items);
+    return '<section class="admin-res-sec" data-sec-kind="' + kind + '">' +
+      '<h3 class="sub-title">' + svgIcon(KIND_META[kind].icon) + ' ' + cfg.heading +
+        ' <span class="cnt">' + groups.length + ' عنوان · ' + items.length + ' عنصر</span></h3>' +
+      '<div class="dyn-composer-mount" data-composer="' + kind + '"></div>' +
+      '<div class="admin-list" id="list-' + kind + '"></div>' +
+    '</section>';
+  }).join('');
+
+  kindsList.forEach(function (kind) {
+    var cfg = getSectionConfig(kind, exMode);
+    var compMount = $('[data-composer="' + kind + '"]', area);
+    var listMount = $('#list-' + kind, area);
+    renderDynamicComposer(compMount, area, lesson, kind, cfg, opts);
+    renderSavedGroupsList(listMount, area, lesson, kind, cfg, opts);
+  });
+}
+
+function renderDynamicComposer(mount, area, lesson, kind, cfg, opts) {
+  if (!mount) return;
+  var exMode = !!opts.exerciseItemMode;
+  var draft = getComposerDraft(lesson.id, kind);
+  if (!draft.blocks.length) draft.blocks.push(makeComposerBlock(kind));
+
+  var blocksHTML = draft.blocks.map(function (blk, bIdx) {
+    var filesStripHTML = '';
+    if (blk.files.length) {
+      filesStripHTML =
+        '<div class="picked-strip">' +
+          blk.files.map(function (pf, fIdx) {
+            var isImg = pf.previewUrl || /^image\//i.test(pf.file.type || '');
+            return '<div class="picked-chip">' +
+              (isImg && pf.previewUrl
+                ? '<img class="picked-thumb" src="' + escapeHtml(pf.previewUrl) + '" alt="">'
+                : '<span class="picked-ico">' + svgIcon(KIND_META[kind === 'exercise' ? (blk.exerciseType || 'file') : kind] ? KIND_META[kind === 'exercise' ? (blk.exerciseType === 'image' ? 'image' : (blk.exerciseType === 'video' ? 'film' : 'file')) : kind].icon : 'file') + '</span>') +
+              '<div class="picked-meta">' +
+                '<strong>#' + (fIdx + 1) + ' — ' + escapeHtml(pf.file.name) + '</strong>' +
+                '<small>' + fmtSize(pf.file.size) + '</small>' +
+              '</div>' +
+              '<div class="picked-acts">' +
+                (blk.files.length > 1
+                  ? '<button type="button" class="mini-ic-btn" data-cact="file-prev" data-b="' + bIdx + '" data-f="' + fIdx + '" title="تقديم"' + (fIdx === 0 ? ' disabled' : '') + '>' + svgIcon('chevron-right') + '</button>' +
+                    '<button type="button" class="mini-ic-btn" data-cact="file-next" data-b="' + bIdx + '" data-f="' + fIdx + '" title="تأخير"' + (fIdx === blk.files.length - 1 ? ' disabled' : '') + '>' + svgIcon('chevron-left') + '</button>'
+                  : '') +
+                '<button type="button" class="mini-ic-btn danger" data-cact="file-del" data-b="' + bIdx + '" data-f="' + fIdx + '" title="إزالة الملف">' + svgIcon('x') + '</button>' +
+              '</div>' +
+            '</div>';
+          }).join('') +
+        '</div>';
+    }
+
+    var urlsHTML = (blk.urls.length ? blk.urls : ['']).map(function (uVal, uIdx) {
+      var isLast = uIdx === blk.urls.length - 1;
+      return '<div class="dyn-url-row">' +
+        '<input class="inp" dir="ltr" data-c-url="' + bIdx + '" data-u="' + uIdx + '" value="' + escapeHtml(uVal) + '" placeholder="' + escapeHtml(cfg.urlPlaceholder + (blk.urls.length > 1 ? ' #' + (uIdx + 1) : '')) + '"' + (draft.saving ? ' disabled' : '') + '>' +
+        (blk.urls.length > 1
+          ? '<button type="button" class="icon-btn danger" data-cact="url-del" data-b="' + bIdx + '" data-u="' + uIdx + '" title="حذف هذا الرابط"' + (draft.saving ? ' disabled' : '') + '>' + svgIcon('x') + '</button>'
+          : '') +
+        (isLast
+          ? '<button type="button" class="btn btn-sm dyn-add-url-btn" data-cact="url-add" data-b="' + bIdx + '"' + (draft.saving ? ' disabled' : '') + '>' + svgIcon('plus') + ' رابط آخر</button>'
+          : '') +
+      '</div>';
+    }).join('');
+
+    return '<div class="dyn-block-card">' +
+      '<div class="dyn-block-head">' +
+        '<span class="dyn-block-badge">' + svgIcon('sparkles') + ' الفقرة / العنوان ' + (bIdx + 1) + '</span>' +
+        '<div class="dyn-block-tools">' +
+          (draft.blocks.length > 1
+            ? '<button type="button" class="mini-ic-btn" data-cact="blk-up" data-b="' + bIdx + '" title="تحريك الفقرة للأعلى"' + (bIdx === 0 || draft.saving ? ' disabled' : '') + '>' + svgIcon('chevron-up') + '</button>' +
+              '<button type="button" class="mini-ic-btn" data-cact="blk-down" data-b="' + bIdx + '" title="تحريك الفقرة للأسفل"' + (bIdx === draft.blocks.length - 1 || draft.saving ? ' disabled' : '') + '>' + svgIcon('chevron-down') + '</button>' +
+              '<button type="button" class="mini-ic-btn danger" data-cact="blk-del" data-b="' + bIdx + '" title="حذف هذه الفقرة"' + (draft.saving ? ' disabled' : '') + '>' + svgIcon('trash') + '</button>'
+            : '') +
+        '</div>' +
+      '</div>' +
+
+      '<div class="frm-row">' +
+        '<input class="inp" data-c-title="' + bIdx + '" value="' + escapeHtml(blk.title) + '" placeholder="' + escapeHtml(cfg.titlePlaceholder) + '"' + (draft.saving ? ' disabled' : '') + '>' +
+        (kind === 'exercise'
+          ? '<select class="inp" data-c-extype="' + bIdx + '" style="max-width:230px"' + (draft.saving ? ' disabled' : '') + '>' +
+              '<option value="image"' + (blk.exerciseType === 'image' ? ' selected' : '') + '>تمرين صور (صورة أو عدة صور)</option>' +
+              '<option value="pdf"' + (blk.exerciseType === 'pdf' ? ' selected' : '') + '>تمرين PDF (ملف أو عدة ملفات)</option>' +
+              '<option value="video"' + (blk.exerciseType === 'video' ? ' selected' : '') + '>تمرين فيديو (فيديو أو عدة أجزاء)</option>' +
+              '<option value="link"' + (blk.exerciseType === 'link' ? ' selected' : '') + '>رابط تطبيقي خارجي</option>' +
+            '</select>'
+          : '') +
+        '<label class="btn file-label' + (draft.saving ? ' muted' : '') + '">' +
+          svgIcon('upload') + ' ' + cfg.uploadBtnLabel +
+          (blk.files.length ? ' (' + blk.files.length + ')' : '') +
+          '<input type="file" multiple accept="' + cfg.accept + '" data-c-pick="' + bIdx + '"' + (draft.saving ? ' disabled' : '') + '>' +
+        '</label>' +
+      '</div>' +
+
+      filesStripHTML +
+      '<div class="dyn-urls-wrap">' + urlsHTML + '</div>' +
+    '</div>';
+  }).join('');
+
+  mount.innerHTML =
+    '<div class="frm-card dyn-composer-shell">' +
+      '<div class="dyn-composer-hint">' +
+        svgIcon('info') +
+        '<span>يمكنك تحت كل <b>عنوان</b> اختيار <b>ملف واحد أو عدة ملفات معاً</b> (أو عدة روابط)، ثم الضغط على <b>«' + cfg.addBlockLabel + '»</b> لإضافة عنوان جديد تحته بترتيب ديناميكي.</span>' +
+      '</div>' +
+      '<div class="dyn-blocks-list">' + blocksHTML + '</div>' +
+      '<div class="dyn-composer-actions">' +
+        '<button type="button" class="btn dyn-new-block-btn" data-cact="blk-add"' + (draft.saving ? ' disabled' : '') + '>' +
+          svgIcon('plus') + ' ' + cfg.addBlockLabel +
+        '</button>' +
+        '<button type="button" class="btn btn-primary" data-cact="save-all"' + (draft.saving ? ' disabled' : '') + '>' +
+          (draft.saving
+            ? '<span class="ai-inline-spin"></span> ' + escapeHtml(draft.progressText || 'جارٍ الرفع والحفظ...')
+            : svgIcon('check') + ' حفظ وإضافة ' + (draft.blocks.length > 1 ? 'جميع الفقرات (' + draft.blocks.length + ')' : 'المحتوى')) +
+        '</button>' +
+      '</div>' +
+      copyAllCheckboxHTML(lesson, kind, exMode, draft) +
+    '</div>';
+
+  var shell = $('.dyn-composer-shell', mount);
+
+  /* تحديث النصوص والخيارات حياً دون إعادة رسم تفقد المؤشر */
+  shell.addEventListener('input', function (e) {
+    var t = e.target;
+    if (t.dataset.cTitle !== undefined) {
+      var b = +t.dataset.cTitle;
+      if (draft.blocks[b]) draft.blocks[b].title = t.value;
+    } else if (t.dataset.cUrl !== undefined) {
+      var bu = +t.dataset.cUrl, ui = +t.dataset.u;
+      if (draft.blocks[bu]) draft.blocks[bu].urls[ui] = t.value;
+    }
+  });
+
+  shell.addEventListener('change', function (e) {
+    var t = e.target;
+    if (t.dataset.cExtype !== undefined) {
+      var b = +t.dataset.cExtype;
+      if (draft.blocks[b]) draft.blocks[b].exerciseType = t.value;
+      return;
+    }
+    if (t.dataset.copyAll !== undefined) {
+      draft.copyAllLessons = !!t.checked;
+      return;
+    }
+    if (t.dataset.copyAllEx !== undefined) {
+      draft.copyAllEx = !!t.checked;
+      return;
+    }
+    if (t.dataset.cPick !== undefined) {
+      var pb = +t.dataset.cPick;
+      var blk = draft.blocks[pb];
+      if (!blk || !t.files || !t.files.length) return;
+      var chosen = Array.prototype.slice.call(t.files);
+      chosen.forEach(function (file) {
+        var pv = /^image\//i.test(file.type || '') ? URL.createObjectURL(file) : '';
+        blk.files.push({ id: uid('pf'), file: file, previewUrl: pv });
+      });
+      if (kind === 'exercise' && chosen[0]) {
+        var mime = String(chosen[0].type || '').toLowerCase();
+        var fname = String(chosen[0].name || '').toLowerCase();
+        if (mime.indexOf('video/') === 0 || /\.(mp4|webm|ogg|mov|mkv)$/i.test(fname)) blk.exerciseType = 'video';
+        else if (mime.indexOf('image/') === 0 || /\.(png|jpe?g|webp|gif|svg)$/i.test(fname)) blk.exerciseType = 'image';
+        else if (mime === 'application/pdf' || /\.pdf$/i.test(fname)) blk.exerciseType = 'pdf';
+      }
+      if (!blk.title.trim() && blk.files.length === 1 && !/^img[-_\d]/i.test(chosen[0].name)) {
+        blk.title = chosen[0].name.replace(/\.[^.]+$/, '');
+      }
+      renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
+    }
+  });
+
+  shell.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-cact]');
+    if (!btn || draft.saving) return;
+    var act = btn.dataset.cact;
+    var b = +btn.dataset.b, f = +btn.dataset.f, u = +btn.dataset.u;
+
+    if (act === 'blk-add') {
+      draft.blocks.push(makeComposerBlock(kind));
+      renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
+      var titleInputs = $all('[data-c-title]', mount);
+      if (titleInputs.length) titleInputs[titleInputs.length - 1].focus();
+    } else if (act === 'blk-del' && draft.blocks[b]) {
+      revokeDraftBlockPreviews(draft.blocks[b]);
+      draft.blocks.splice(b, 1);
+      if (!draft.blocks.length) draft.blocks.push(makeComposerBlock(kind));
+      renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
+    } else if (act === 'blk-up' && b > 0) {
+      var tmpB = draft.blocks[b - 1];
+      draft.blocks[b - 1] = draft.blocks[b];
+      draft.blocks[b] = tmpB;
+      renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
+    } else if (act === 'blk-down' && b < draft.blocks.length - 1) {
+      var tmpB2 = draft.blocks[b + 1];
+      draft.blocks[b + 1] = draft.blocks[b];
+      draft.blocks[b] = tmpB2;
+      renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
+    } else if (act === 'file-del' && draft.blocks[b] && draft.blocks[b].files[f]) {
+      var removed = draft.blocks[b].files.splice(f, 1)[0];
+      if (removed && removed.previewUrl) { try { URL.revokeObjectURL(removed.previewUrl); } catch (err) {} }
+      renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
+    } else if (act === 'file-prev' && draft.blocks[b] && f > 0) {
+      var arrF = draft.blocks[b].files;
+      var tf = arrF[f - 1]; arrF[f - 1] = arrF[f]; arrF[f] = tf;
+      renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
+    } else if (act === 'file-next' && draft.blocks[b] && f < draft.blocks[b].files.length - 1) {
+      var arrF2 = draft.blocks[b].files;
+      var tf2 = arrF2[f + 1]; arrF2[f + 1] = arrF2[f]; arrF2[f] = tf2;
+      renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
+    } else if (act === 'url-add' && draft.blocks[b]) {
+      draft.blocks[b].urls.push('');
+      renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
+      var urlInps = $all('[data-c-url="' + b + '"]', mount);
+      if (urlInps.length) urlInps[urlInps.length - 1].focus();
+    } else if (act === 'url-del' && draft.blocks[b] && draft.blocks[b].urls.length > 1) {
+      draft.blocks[b].urls.splice(u, 1);
+      renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
+    } else if (act === 'save-all') {
+      saveComposerBlocks(mount, area, lesson, kind, cfg, opts);
+    }
+  });
+}
+
+function saveComposerBlocks(mount, area, lesson, kind, cfg, opts) {
+  var draft = getComposerDraft(lesson.id, kind);
+  var nonEmptyBlocks = [];
+  var totalUploads = 0;
+
+  draft.blocks.forEach(function (blk) {
+    var cleanUrls = (blk.urls || []).map(function (u) { return String(u || '').trim(); }).filter(Boolean);
+    if (blk.files.length || cleanUrls.length) {
+      nonEmptyBlocks.push({
+        title: String(blk.title || '').trim(),
+        exerciseType: kind === 'exercise' ? (blk.exerciseType || 'image') : undefined,
+        files: blk.files.slice(),
+        urls: cleanUrls
+      });
+      totalUploads += blk.files.length;
+    }
+  });
+
+  if (!nonEmptyBlocks.length) {
+    toast('اختر ملفاً/صورة أو الصق رابطاً واحداً على الأقل قبل الحفظ', 'err');
+    return;
   }
 
-  bindFilePickers(area);
+  draft.saving = true;
+  var uploadedSoFar = 0;
+  draft.progressText = totalUploads ? 'جارٍ رفع الملف 1 من ' + totalUploads + '...' : 'جارٍ الحفظ...';
+  renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
 
-  /* ربط أزرار الإضافة */
-  ['video', 'pdf', 'image'].forEach(function (kind) {
-    var addBtn = $('#add-' + kind, area);
-    if (addBtn) addBtn.addEventListener('click', function () {
-      addResource(area, lesson, kind, null, opts);
+  var maxOrder = resourcesOf(data, lesson.id, kind).reduce(function (m, r) { return Math.max(m, r.order || 0); }, 0);
+  var existingGroupCount = groupResources(resourcesOf(data, lesson.id, kind)).length;
+  var newlyCreated = [];
+
+  var chain = Promise.resolve();
+
+  nonEmptyBlocks.forEach(function (bPlan, bIdx) {
+    chain = chain.then(function () {
+      var groupId = uid('g');
+      var fallbackTitle = bPlan.title ||
+        (nonEmptyBlocks.length > 1 || existingGroupCount > 0
+          ? KIND_META[kind].label + ' ' + (existingGroupCount + bIdx + 1)
+          : (bPlan.urls[0] ? guessFileName(bPlan.urls[0]) : KIND_META[kind].label));
+      var groupTitle = bPlan.title || fallbackTitle;
+      var totalInBlock = bPlan.files.length + bPlan.urls.length;
+      var itemCounter = 0;
+
+      var blockChain = Promise.resolve();
+
+      bPlan.files.forEach(function (pf) {
+        blockChain = blockChain.then(function () {
+          uploadedSoFar++;
+          draft.progressText = 'جارٍ رفع الملف ' + uploadedSoFar + ' من ' + totalUploads + '...';
+          var saveBtn = $('[data-cact="save-all"]', mount);
+          if (saveBtn) saveBtn.innerHTML = '<span class="ai-inline-spin"></span> ' + escapeHtml(draft.progressText);
+
+          return filePut(pf.file).then(function (fid) {
+            itemCounter++;
+            maxOrder++;
+            var itemTitle = totalInBlock > 1 ? (groupTitle + ' (' + itemCounter + ')') : groupTitle;
+            var rec = {
+              id: uid('r'),
+              lessonId: lesson.id,
+              kind: kind,
+              title: itemTitle,
+              url: fid,
+              size: pf.file.size || undefined,
+              exerciseType: bPlan.exerciseType || undefined,
+              groupId: groupId,
+              groupTitle: groupTitle,
+              order: maxOrder
+            };
+            data.resources.push(rec);
+            newlyCreated.push(rec);
+          });
+        });
+      });
+
+      blockChain = blockChain.then(function () {
+        bPlan.urls.forEach(function (uStr) {
+          itemCounter++;
+          maxOrder++;
+          var itemTitle = totalInBlock > 1 ? (groupTitle + ' (' + itemCounter + ')') : groupTitle;
+          var rec = {
+            id: uid('r'),
+            lessonId: lesson.id,
+            kind: kind,
+            title: itemTitle,
+            url: uStr,
+            exerciseType: bPlan.exerciseType || undefined,
+            groupId: groupId,
+            groupTitle: groupTitle,
+            order: maxOrder
+          };
+          data.resources.push(rec);
+          newlyCreated.push(rec);
+        });
+      });
+
+      return blockChain;
     });
   });
-  var addExBtn = $('#add-exercise', area);
-  if (addExBtn) {
-    addExBtn.addEventListener('click', function () {
-      addResource(area, lesson, 'exercise', $('#ex-type', area).value, opts);
-    });
-  }
 
-  /* ربط القوائم */
-  var kindsList = exMode ? ['video', 'pdf', 'image'] : ['video', 'pdf', 'image', 'exercise'];
-  kindsList.forEach(function (kind) {
-    bindList($('#list-' + kind, area), {
-      up: function (id) { moveItem(resourcesOf(data, lesson.id, kind), id, -1); renderResourceSections(area, lesson, opts); },
-      down: function (id) { moveItem(resourcesOf(data, lesson.id, kind), id, 1); renderResourceSections(area, lesson, opts); },
-      rename: function (id) {
-        var r = data.resources.find(function (x) { return x.id === id; });
-        var fields = [
-          { key: 'title', label: 'العنوان الظاهر للطلاب', value: r.title || '', placeholder: 'مثال: ملخص الدرس الأول' },
-          { key: 'url', label: 'الرابط', value: r.url, dir: 'ltr', placeholder: 'https://... أو اتركه كما هو للملفات المرفوعة' },
-          { key: 'order', label: 'موضعه في ترتيب هذا النوع', type: 'number', value: r.order || 1 }
-        ];
-        if (r.kind === 'exercise') {
-          fields.push({ key: 'type', label: 'نوع التمرين', type: 'select', value: r.exerciseType || 'pdf',
-            options: [
-              { value: 'pdf', label: 'ملف PDF' },
-              { value: 'video', label: 'فيديو (يُشغَّل في المشغل)' },
-              { value: 'image', label: 'صورة (تُعرض في مكبّر الصور)' },
-              { value: 'link', label: 'رابط موقع' }
-            ] });
-        }
-        openEditDialog({
-          title: 'تعديل ' + KIND_META[r.kind].label, icon: KIND_META[r.kind].icon,
-          fields: fields,
-          onSave: function (v) {
-            if (v.title.trim()) r.title = v.title.trim();
-            if (v.url.trim()) r.url = v.url.trim();
-            if (r.kind === 'exercise') r.exerciseType = v.type;
-            setItemOrder(resourcesOf(data, lesson.id, r.kind), r.id, v.order);
-            save(); renderResourceSections(area, lesson, opts); toast('تم حفظ التعديلات');
-          }
-        });
-      },
-      copyAllUnit: function (id) { copyResourceToAllUnitLessonsAction(id, lesson); },
-      copy: function (id) { openCopyResourceDialog(id, area, lesson, opts); },
-      view: function (id) { previewResource(id); },
-      del: function (id) {
-        var r = data.resources.find(function (x) { return x.id === id; });
-        if (r && confirm('حذف "' + (r.title || KIND_META[r.kind].label) + '"؟')) {
-          deleteCascade('resource', id);
-          renderResourceSections(area, lesson, opts);
-          toast('تم الحذف', 'info');
-        }
-      }
+  chain.then(function () {
+    var copyLessonsFlag = draft.copyAllLessons;
+    var copyExFlag = draft.copyAllEx;
+    var copiedLessons = 0, copiedExs = 0;
+
+    if (copyLessonsFlag && newlyCreated.length) {
+      var otherLessons = lessonsOf(data, lesson.unitId).filter(function (l) { return l.id !== lesson.id; });
+      copiedLessons = copyResourcesBundleToTargets(newlyCreated, otherLessons).targetsUpdated;
+    }
+    if (copyExFlag && newlyCreated.length) {
+      var otherExs = unitExercisesOf(data, lesson.unitId).filter(function (x) { return x.id !== lesson.id; });
+      copiedExs = copyResourcesBundleToTargets(newlyCreated, otherExs).targetsUpdated;
+    }
+
+    save();
+    resetComposerDraft(lesson.id, kind);
+    renderResourceSections(area, lesson, opts);
+
+    var summaryMsg = 'تمت إضافة ' + nonEmptyBlocks.length + ' عنوان (' + newlyCreated.length + ' عنصر)';
+    if (copiedLessons > 0 || copiedExs > 0) {
+      var parts = [];
+      if (copiedLessons > 0) parts.push(copiedLessons + ' درس');
+      if (copiedExs > 0) parts.push(copiedExs + ' تمرين');
+      toast(summaryMsg + ' ونسخها تلقائياً إلى ' + parts.join(' و ') + ' داخل الوحدة');
+    } else {
+      toast(summaryMsg + ' بنجاح');
+    }
+  }).catch(function (err) {
+    draft.saving = false;
+    draft.progressText = '';
+    renderDynamicComposer(mount, area, lesson, kind, cfg, opts);
+    toast('تعذّر إكمال رفع الملفات: ' + String((err && err.message) || err || ''), 'err');
+  });
+}
+
+/* ============ عرض وإدارة المجموعات المضافة (عنوان + عناصره) ============ */
+function rebuildOrdersFromGroups(groups) {
+  var ord = 0;
+  groups.forEach(function (g) {
+    g.items.forEach(function (it) {
+      ord++;
+      it.order = ord;
     });
   });
 }
 
-/* نسخ فوري لأي ملخص أو تمرين أو مورد إلى جميع دروس نفس الوحدة بنقرة واحدة */
-function copyResourceToAllUnitLessonsAction(resourceId, currentItem) {
-  var resource = data.resources.find(function (x) { return x.id === resourceId; });
-  if (!resource || !currentItem) return;
+function renderSavedGroupsList(listMount, area, lesson, kind, cfg, opts) {
+  if (!listMount) return;
+  var items = resourcesOf(data, lesson.id, kind);
+  if (!items.length) {
+    listMount.innerHTML = '<div class="empty">لا يوجد محتوى مضاف في هذا القسم بعد</div>';
+    return;
+  }
+
+  var groups = groupResources(items);
+
+  listMount.innerHTML = groups.map(function (g, gIdx) {
+    var gTitle = g.title || (KIND_META[kind].label + ' ' + (gIdx + 1));
+    var isImgGroup = kind === 'image' || (kind === 'exercise' && (g.exerciseType || g.items[0].exerciseType) === 'image');
+    var exTypeLbl = kind === 'exercise'
+      ? ' · ' + ({ image: 'صور', video: 'فيديو', pdf: 'PDF', link: 'رابط' }[g.exerciseType || g.items[0].exerciseType || 'link'] || '')
+      : '';
+
+    var bodyHTML;
+    if (isImgGroup) {
+      bodyHTML = '<div class="admin-group-thumbs">' +
+        g.items.map(function (r, iIdx) {
+          return '<div class="admin-thumb-card" data-res-thumb="' + r.id + '">' +
+            '<div class="admin-thumb-preview" data-gact="item-view" data-id="' + r.id + '" title="اضغط للمعاينة">' +
+              '<span class="admin-thumb-idx">#' + (iIdx + 1) + '</span>' +
+              '<div class="admin-thumb-ph">' + svgIcon('image') + '</div>' +
+              '<img alt="' + escapeHtml(r.title || gTitle) + '" hidden>' +
+            '</div>' +
+            '<div class="admin-thumb-bar">' +
+              (g.items.length > 1
+                ? '<button type="button" class="mini-ic-btn" data-gact="item-prev" data-g="' + gIdx + '" data-id="' + r.id + '" title="تقديم الصورة"' + (iIdx === 0 ? ' disabled' : '') + '>' + svgIcon('chevron-right') + '</button>' +
+                  '<button type="button" class="mini-ic-btn" data-gact="item-next" data-g="' + gIdx + '" data-id="' + r.id + '" title="تأخير الصورة"' + (iIdx === g.items.length - 1 ? ' disabled' : '') + '>' + svgIcon('chevron-left') + '</button>'
+                : '') +
+              '<button type="button" class="mini-ic-btn" data-gact="item-view" data-id="' + r.id + '" title="معاينة">' + svgIcon('eye') + '</button>' +
+              '<button type="button" class="mini-ic-btn" data-gact="item-edit" data-id="' + r.id + '" title="تعديل الرابط أو الوصف">' + svgIcon('pencil') + '</button>' +
+              '<button type="button" class="mini-ic-btn danger" data-gact="item-del" data-id="' + r.id + '" title="حذف هذه الصورة">' + svgIcon('trash') + '</button>' +
+            '</div>' +
+          '</div>';
+        }).join('') +
+      '</div>';
+    } else {
+      bodyHTML = '<div class="admin-group-sublist">' +
+        g.items.map(function (r, iIdx) {
+          var srcTxt;
+          if (isSbUrl(r.url)) srcTxt = svgIcon('cloud') + ' ملف في السحابة' + (r.size ? ' (' + fmtSize(r.size) + ')' : '');
+          else if (isIdbUrl(r.url)) srcTxt = svgIcon('folder') + ' ملف مرفوع' + (r.size ? ' (' + fmtSize(r.size) + ')' : '');
+          else if (youtubeId(r.url)) srcTxt = svgIcon('film') + ' يوتيوب';
+          else srcTxt = svgIcon('link') + ' رابط خارجي';
+
+          return '<div class="admin-subitem-row">' +
+            '<span class="admin-subitem-num">' + (iIdx + 1) + '</span>' +
+            '<div class="admin-subitem-info">' +
+              '<div class="admin-subitem-title">' + escapeHtml(r.title || gTitle) + '</div>' +
+              '<div class="item-sub" dir="rtl" style="text-align:right">' + srcTxt + '</div>' +
+            '</div>' +
+            '<div class="admin-subitem-acts">' +
+              (g.items.length > 1
+                ? '<button type="button" class="mini-ic-btn" data-gact="item-prev" data-g="' + gIdx + '" data-id="' + r.id + '" title="للأعلى"' + (iIdx === 0 ? ' disabled' : '') + '>' + svgIcon('chevron-up') + '</button>' +
+                  '<button type="button" class="mini-ic-btn" data-gact="item-next" data-g="' + gIdx + '" data-id="' + r.id + '" title="للأسفل"' + (iIdx === g.items.length - 1 ? ' disabled' : '') + '>' + svgIcon('chevron-down') + '</button>'
+                : '') +
+              '<button type="button" class="mini-ic-btn" data-gact="item-view" data-id="' + r.id + '" title="معاينة">' + svgIcon('eye') + '</button>' +
+              '<button type="button" class="mini-ic-btn" data-gact="item-edit" data-id="' + r.id + '" title="تعديل العنصر">' + svgIcon('pencil') + '</button>' +
+              '<button type="button" class="mini-ic-btn danger" data-gact="item-del" data-id="' + r.id + '" title="حذف هذا العنصر">' + svgIcon('trash') + '</button>' +
+            '</div>' +
+          '</div>';
+        }).join('') +
+      '</div>';
+    }
+
+    return '<div class="res-group-admin">' +
+      '<div class="res-group-admin-head">' +
+        '<div class="res-group-admin-title">' +
+          '<span class="item-ico">' + (gIdx + 1) + '</span>' +
+          '<div>' +
+            '<div class="item-title">' + escapeHtml(gTitle) + '</div>' +
+            '<div class="item-sub" dir="rtl" style="text-align:right">' + g.items.length + ' عنصر تحت هذا العنوان' + exTypeLbl + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="item-acts">' +
+          '<button type="button" class="btn-mini-add" data-gact="g-append" data-g="' + gIdx + '" title="إضافة صور أو ملفات أو روابط أخرى تحت هذا العنوان">' +
+            svgIcon('plus') + '<span>إضافة لهذا العنوان</span>' +
+          '</button>' +
+          '<button type="button" class="btn-mini-copy" data-gact="g-copy-unit" data-g="' + gIdx + '" title="نسخ هذا العنوان بجميع عناصره إلى كل دروس الوحدة">' +
+            svgIcon('copy') + '<span>نسخ لكل دروس الوحدة</span>' +
+          '</button>' +
+          '<button type="button" class="icon-btn" data-gact="g-copy" data-g="' + gIdx + '" title="نسخ المجموعة إلى وجهة محددة">' + svgIcon('copy') + '</button>' +
+          '<button type="button" class="icon-btn" data-gact="g-up" data-g="' + gIdx + '" title="تحريك العنوان للأعلى"' + (gIdx === 0 ? ' disabled' : '') + '>' + svgIcon('chevron-up') + '</button>' +
+          '<button type="button" class="icon-btn" data-gact="g-down" data-g="' + gIdx + '" title="تحريك العنوان للأسفل"' + (gIdx === groups.length - 1 ? ' disabled' : '') + '>' + svgIcon('chevron-down') + '</button>' +
+          '<button type="button" class="icon-btn" data-gact="g-rename" data-g="' + gIdx + '" title="تعديل العنوان">' + svgIcon('pencil') + '</button>' +
+          '<button type="button" class="icon-btn danger" data-gact="g-del" data-g="' + gIdx + '" title="حذف العنوان وكل عناصره">' + svgIcon('trash') + '</button>' +
+        '</div>' +
+      '</div>' +
+      bodyHTML +
+    '</div>';
+  }).join('');
+
+  /* تحميل مصغّرات الصور الفعلية داخل لوحة الإدارة */
+  $all('[data-res-thumb]', listMount).forEach(function (card) {
+    var rid = card.dataset.resThumb;
+    var rObj = data.resources.find(function (x) { return x.id === rid; });
+    if (!rObj) return;
+    resolveSrc(rObj.url).then(function (res) {
+      if (!res || res.kind === 'error' || !res.src) return;
+      var imgEl = card.querySelector('img');
+      var phEl = card.querySelector('.admin-thumb-ph');
+      if (!imgEl) return;
+      imgEl.onload = function () {
+        imgEl.hidden = false;
+        if (phEl) phEl.style.display = 'none';
+      };
+      imgEl.src = res.src;
+    });
+  });
+
+  listMount.addEventListener('click', function (e) {
+    var btn = e.target.closest('[data-gact]');
+    if (!btn) return;
+    var act = btn.dataset.gact;
+    var gIdx = +btn.dataset.g;
+    var itemId = btn.dataset.id;
+    var currentGroups = groupResources(resourcesOf(data, lesson.id, kind));
+    var targetGroup = currentGroups[gIdx];
+
+    if (act === 'g-up' && gIdx > 0) {
+      var tmpG = currentGroups[gIdx - 1];
+      currentGroups[gIdx - 1] = currentGroups[gIdx];
+      currentGroups[gIdx] = tmpG;
+      rebuildOrdersFromGroups(currentGroups);
+      save();
+      renderResourceSections(area, lesson, opts);
+    } else if (act === 'g-down' && gIdx < currentGroups.length - 1) {
+      var tmpG2 = currentGroups[gIdx + 1];
+      currentGroups[gIdx + 1] = currentGroups[gIdx];
+      currentGroups[gIdx] = tmpG2;
+      rebuildOrdersFromGroups(currentGroups);
+      save();
+      renderResourceSections(area, lesson, opts);
+    } else if (act === 'g-rename' && targetGroup) {
+      var fields = [
+        { key: 'title', label: 'عنوان الفقرة / المجموعة الظاهر للطلاب', value: targetGroup.title || '', placeholder: 'مثال: الحل المفصّل للتمرين' },
+        { key: 'order', label: 'موضع المجموعة بين العناوين', type: 'number', value: gIdx + 1 }
+      ];
+      if (kind === 'exercise') {
+        fields.push({
+          key: 'type', label: 'نوع التمرين', type: 'select',
+          value: targetGroup.exerciseType || targetGroup.items[0].exerciseType || 'image',
+          options: [
+            { value: 'image', label: 'صور (صورة أو عدة صور)' },
+            { value: 'pdf', label: 'ملفات PDF' },
+            { value: 'video', label: 'فيديو (يُشغَّل في المشغل)' },
+            { value: 'link', label: 'رابط موقع' }
+          ]
+        });
+      }
+      openEditDialog({
+        title: 'تعديل عنوان المجموعة', icon: KIND_META[kind].icon,
+        fields: fields,
+        onSave: function (v) {
+          var newTitle = v.title.trim() || targetGroup.title;
+          var ensureGid = targetGroup.groupId || uid('g');
+          targetGroup.items.forEach(function (it, idx) {
+            var oldGroupTitle = it.groupTitle || it.title || '';
+            it.groupId = ensureGid;
+            it.groupTitle = newTitle;
+            if (targetGroup.items.length === 1 || !it.title || it.title === oldGroupTitle || it.title.indexOf(oldGroupTitle + ' (') === 0) {
+              it.title = targetGroup.items.length > 1 ? (newTitle + ' (' + (idx + 1) + ')') : newTitle;
+            }
+            if (kind === 'exercise' && v.type) it.exerciseType = v.type;
+          });
+          var newPos = Math.max(0, Math.min(currentGroups.length - 1, (parseInt(v.order, 10) || (gIdx + 1)) - 1));
+          if (newPos !== gIdx) {
+            var moved = currentGroups.splice(gIdx, 1)[0];
+            currentGroups.splice(newPos, 0, moved);
+          }
+          rebuildOrdersFromGroups(currentGroups);
+          save();
+          renderResourceSections(area, lesson, opts);
+          toast('تم تحديث عنوان المجموعة');
+        }
+      });
+    } else if (act === 'g-append' && targetGroup) {
+      openAppendToGroupDialog(targetGroup, gIdx, area, lesson, kind, cfg, opts);
+    } else if (act === 'g-copy-unit' && targetGroup) {
+      copyGroupToAllUnitLessonsAction(targetGroup.items, targetGroup.title || KIND_META[kind].label, lesson);
+    } else if (act === 'g-copy' && targetGroup) {
+      openCopyBundleDialog(targetGroup.items, targetGroup.title || KIND_META[kind].label, area, lesson, opts);
+    } else if (act === 'g-del' && targetGroup) {
+      var gLbl = targetGroup.title || KIND_META[kind].label;
+      if (confirm('حذف العنوان "' + gLbl + '" مع جميع عناصره (' + targetGroup.items.length + ')؟')) {
+        var idsToDel = targetGroup.items.map(function (x) { return x.id; });
+        var urlsToCheck = [];
+        idsToDel.forEach(function (rid) {
+          var found = data.resources.find(function (x) { return x.id === rid; });
+          if (found && urlsToCheck.indexOf(found.url) === -1) urlsToCheck.push(found.url);
+        });
+        data.resources = data.resources.filter(function (x) { return idsToDel.indexOf(x.id) === -1; });
+        urlsToCheck.forEach(releaseFileIfUnused);
+        normalizeOrders(resourcesOf(data, lesson.id, kind));
+        save();
+        renderResourceSections(area, lesson, opts);
+        toast('تم حذف المجموعة بالكامل', 'info');
+      }
+    } else if (act === 'item-prev' && targetGroup) {
+      var idxP = targetGroup.items.findIndex(function (x) { return x.id === itemId; });
+      if (idxP > 0) {
+        var sw = targetGroup.items[idxP - 1];
+        targetGroup.items[idxP - 1] = targetGroup.items[idxP];
+        targetGroup.items[idxP] = sw;
+        rebuildOrdersFromGroups(currentGroups);
+        save();
+        renderResourceSections(area, lesson, opts);
+      }
+    } else if (act === 'item-next' && targetGroup) {
+      var idxN = targetGroup.items.findIndex(function (x) { return x.id === itemId; });
+      if (idxN >= 0 && idxN < targetGroup.items.length - 1) {
+        var sw2 = targetGroup.items[idxN + 1];
+        targetGroup.items[idxN + 1] = targetGroup.items[idxN];
+        targetGroup.items[idxN] = sw2;
+        rebuildOrdersFromGroups(currentGroups);
+        save();
+        renderResourceSections(area, lesson, opts);
+      }
+    } else if (act === 'item-view' && itemId) {
+      previewResource(itemId);
+    } else if (act === 'item-edit' && itemId) {
+      var rEdit = data.resources.find(function (x) { return x.id === itemId; });
+      if (!rEdit) return;
+      openEditDialog({
+        title: 'تعديل العنصر', icon: KIND_META[rEdit.kind].icon,
+        fields: [
+          { key: 'title', label: 'العنوان الفرعي للعنصر', value: rEdit.title || '', placeholder: 'مثال: الصفحة 1 / الجزء الأول' },
+          { key: 'url', label: 'الرابط', value: rEdit.url, dir: 'ltr', placeholder: 'https://... أو اتركه كما هو للملفات المرفوعة' }
+        ],
+        onSave: function (v) {
+          if (v.title.trim()) rEdit.title = v.title.trim();
+          if (v.url.trim()) rEdit.url = v.url.trim();
+          save();
+          renderResourceSections(area, lesson, opts);
+          toast('تم حفظ تعديل العنصر');
+        }
+      });
+    } else if (act === 'item-del' && itemId) {
+      var rDel = data.resources.find(function (x) { return x.id === itemId; });
+      if (rDel && confirm('حذف هذا العنصر من المجموعة؟')) {
+        deleteCascade('resource', itemId);
+        normalizeOrders(resourcesOf(data, lesson.id, kind));
+        save();
+        renderResourceSections(area, lesson, opts);
+        toast('تم حذف العنصر', 'info');
+      }
+    }
+  });
+}
+
+/* نافذة سريعة لإضافة صور/ملفات/روابط جديدة مباشرة داخل عنوان مجموعة موجودة */
+function openAppendToGroupDialog(targetGroup, gIdx, area, lesson, kind, cfg, opts) {
+  var old = document.querySelector('.modal-overlay');
+  if (old) old.remove();
+
+  var gTitle = targetGroup.title || KIND_META[kind].label;
+  var pickedAppendFiles = [];
+  var appendSaving = false;
+
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.innerHTML =
+    '<div class="modal" role="dialog" aria-modal="true">' +
+      '<h3>' + svgIcon('plus') + ' إضافة عناصر إلى: «' + escapeHtml(gTitle) + '»</h3>' +
+      '<div class="edit-form">' +
+        '<div class="field">' +
+          '<span>ارفع ملفاً أو عدة ملفات من الجهاز</span>' +
+          '<label class="btn file-label" style="justify-content:center">' +
+            svgIcon('upload') + ' ' + cfg.uploadBtnLabel +
+            '<input type="file" multiple accept="' + cfg.accept + '" id="appendFilesInp">' +
+          '</label>' +
+          '<div id="appendPickedStrip" class="picked-strip"></div>' +
+        '</div>' +
+        '<label class="field">' +
+          '<span>أو الصق رابطاً (أو عدة روابط، كل رابط في سطر)</span>' +
+          '<textarea class="inp" id="appendUrlsTxt" rows="3" dir="ltr" placeholder="https://...\nhttps://..."></textarea>' +
+        '</label>' +
+        '<div class="acts">' +
+          '<button type="button" class="btn" id="appendCancelBtn">' + svgIcon('x') + ' إلغاء</button>' +
+          '<button type="button" class="btn btn-primary" id="appendSaveBtn">' + svgIcon('check') + ' إضافة للمجموعة</button>' +
+        '</div>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(overlay);
+
+  function cleanupAndClose() {
+    pickedAppendFiles.forEach(function (pf) {
+      if (pf.previewUrl) { try { URL.revokeObjectURL(pf.previewUrl); } catch (e) {} }
+    });
+    overlay.remove();
+  }
+
+  function renderAppendStrip() {
+    var strip = $('#appendPickedStrip', overlay);
+    if (!pickedAppendFiles.length) { strip.innerHTML = ''; return; }
+    strip.innerHTML = pickedAppendFiles.map(function (pf, idx) {
+      return '<div class="picked-chip">' +
+        (pf.previewUrl ? '<img class="picked-thumb" src="' + escapeHtml(pf.previewUrl) + '" alt="">' : '<span class="picked-ico">' + svgIcon(KIND_META[kind].icon) + '</span>') +
+        '<div class="picked-meta"><strong>#' + (idx + 1) + ' — ' + escapeHtml(pf.file.name) + '</strong><small>' + fmtSize(pf.file.size) + '</small></div>' +
+        '<button type="button" class="mini-ic-btn danger" data-rm-ap="' + idx + '">' + svgIcon('x') + '</button>' +
+      '</div>';
+    }).join('');
+  }
+
+  $('#appendFilesInp', overlay).addEventListener('change', function () {
+    var chosen = Array.prototype.slice.call(this.files || []);
+    chosen.forEach(function (f) {
+      pickedAppendFiles.push({
+        file: f,
+        previewUrl: /^image\//i.test(f.type || '') ? URL.createObjectURL(f) : ''
+      });
+    });
+    renderAppendStrip();
+  });
+
+  $('#appendPickedStrip', overlay).addEventListener('click', function (e) {
+    var rm = e.target.closest('[data-rm-ap]');
+    if (!rm || appendSaving) return;
+    var i = +rm.dataset.rmAp;
+    var sp = pickedAppendFiles.splice(i, 1)[0];
+    if (sp && sp.previewUrl) { try { URL.revokeObjectURL(sp.previewUrl); } catch (err) {} }
+    renderAppendStrip();
+  });
+
+  overlay.addEventListener('click', function (e) { if (e.target === overlay && !appendSaving) cleanupAndClose(); });
+  $('#appendCancelBtn', overlay).addEventListener('click', function () { if (!appendSaving) cleanupAndClose(); });
+
+  $('#appendSaveBtn', overlay).addEventListener('click', function () {
+    if (appendSaving) return;
+    var rawUrls = ($('#appendUrlsTxt', overlay).value || '')
+      .split(/\r?\n/)
+      .map(function (s) { return s.trim(); })
+      .filter(Boolean);
+
+    if (!pickedAppendFiles.length && !rawUrls.length) {
+      toast('اختر ملفاً أو الصق رابطاً واحداً على الأقل', 'err');
+      return;
+    }
+
+    appendSaving = true;
+    var saveBtn = $('#appendSaveBtn', overlay);
+    saveBtn.disabled = true;
+
+    var currentGroups = groupResources(resourcesOf(data, lesson.id, kind));
+    var grp = currentGroups[gIdx];
+    if (!grp) { cleanupAndClose(); return; }
+
+    var gid = grp.groupId || uid('g');
+    var exType = kind === 'exercise' ? (grp.exerciseType || grp.items[0].exerciseType || 'image') : undefined;
+    grp.items.forEach(function (it, idx) {
+      it.groupId = gid;
+      it.groupTitle = gTitle;
+      if (grp.items.length === 1 && (!it.title || it.title === gTitle)) {
+        it.title = gTitle + ' (1)';
+      } else if (!it.title) {
+        it.title = gTitle + ' (' + (idx + 1) + ')';
+      }
+    });
+
+    var seq = grp.items.length;
+    var upIdx = 0;
+    var chain = Promise.resolve();
+
+    pickedAppendFiles.forEach(function (pf) {
+      chain = chain.then(function () {
+        upIdx++;
+        saveBtn.innerHTML = '<span class="ai-inline-spin"></span> جارٍ الرفع (' + upIdx + '/' + pickedAppendFiles.length + ')...';
+        return filePut(pf.file).then(function (fid) {
+          seq++;
+          var rec = {
+            id: uid('r'), lessonId: lesson.id, kind: kind,
+            title: gTitle + ' (' + seq + ')',
+            url: fid, size: pf.file.size || undefined,
+            exerciseType: exType,
+            groupId: gid, groupTitle: gTitle, order: 9999
+          };
+          data.resources.push(rec);
+          grp.items.push(rec);
+        });
+      });
+    });
+
+    chain.then(function () {
+      rawUrls.forEach(function (uStr) {
+        seq++;
+        var rec = {
+          id: uid('r'), lessonId: lesson.id, kind: kind,
+          title: gTitle + ' (' + seq + ')',
+          url: uStr,
+          exerciseType: exType,
+          groupId: gid, groupTitle: gTitle, order: 9999
+        };
+        data.resources.push(rec);
+        grp.items.push(rec);
+      });
+
+      rebuildOrdersFromGroups(currentGroups);
+      save();
+      cleanupAndClose();
+      renderResourceSections(area, lesson, opts);
+      toast('تمت إضافة العناصر الجديدة تحت عنوان «' + gTitle + '»');
+    }).catch(function (err) {
+      appendSaving = false;
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = svgIcon('check') + ' إضافة للمجموعة';
+      toast('تعذّر الرفع: ' + String((err && err.message) || err || ''), 'err');
+    });
+  });
+}
+
+/* نسخ مجموعة كاملة (عنوان + كل صوره/ملفاته) إلى جميع دروس الوحدة بنقرة واحدة */
+function copyGroupToAllUnitLessonsAction(groupItems, label, currentItem) {
+  if (!groupItems || !groupItems.length || !currentItem) return;
   var unit = getUnit(data, currentItem.unitId);
   var targetLessons = lessonsOf(data, currentItem.unitId).filter(function (l) { return l.id !== currentItem.id; });
   if (!targetLessons.length) {
-    toast('لا توجد دروس أخرى داخل هذه الوحدة لنسخ العنصر إليها', 'info');
+    toast('لا توجد دروس أخرى داخل هذه الوحدة لنسخ المجموعة إليها', 'info');
     return;
   }
-  var label = resource.title || KIND_META[resource.kind].label;
   var unitTitle = unit ? unit.title : 'هذه الوحدة';
-  if (!confirm('نسخ "' + label + '" إلى جميع الدروس داخل وحدة "' + unitTitle + '" (' + targetLessons.length + ' درس)؟')) {
+  if (!confirm('نسخ "' + label + '" (' + groupItems.length + ' عنصر) إلى جميع الدروس داخل وحدة "' + unitTitle + '" (' + targetLessons.length + ' درس)؟')) {
     return;
   }
-  var res = copySingleResourceToTargets(resource, targetLessons);
-  if (res.added > 0) {
+  var res = copyResourcesBundleToTargets(groupItems, targetLessons);
+  if (res.targetsUpdated > 0) {
     save();
-    toast('تم نسخ "' + label + '" إلى ' + res.added + ' درس داخل الوحدة' + (res.skipped ? ' (وموجود مسبقاً في ' + res.skipped + ')' : ''));
+    toast('تم نسخ "' + label + '" إلى ' + res.targetsUpdated + ' درس داخل الوحدة');
   } else {
-    toast('هذا العنصر موجود مسبقاً في جميع دروس الوحدة', 'info');
+    toast('هذه المجموعة موجودة مسبقاً في جميع دروس الوحدة', 'info');
   }
 }
 
@@ -1375,10 +2212,9 @@ function previewResource(id) {
   });
 }
 
-/* نافذة نسخ موسّعة: تدعم النسخ إلى (جميع دروس الوحدة) أو (جميع تمارين الوحدة) أو (درس/تمرين محدد). */
-function openCopyResourceDialog(id, area, currentLesson, opts) {
-  var resource = data.resources.find(function (x) { return x.id === id; });
-  if (!resource) return;
+/* نافذة نسخ موسّعة للمجموعة كاملة: تدعم (جميع دروس الوحدة) أو (جميع تمارين الوحدة) أو (درس/تمرين محدد). */
+function openCopyBundleDialog(bundleItems, label, area, currentLesson, opts) {
+  if (!bundleItems || !bundleItems.length) return;
   var unit = getUnit(data, currentLesson.unitId);
   var unitName = unit ? unit.title : 'الوحدة الحالية';
   var unitLessons = lessonsOf(data, currentLesson.unitId).filter(function (l) { return l.id !== currentLesson.id; });
@@ -1410,49 +2246,56 @@ function openCopyResourceDialog(id, area, currentLesson, opts) {
   });
 
   openEditDialog({
-    title: 'نسخ ' + (resource.title || KIND_META[resource.kind].label), icon: 'copy',
+    title: 'نسخ «' + label + '» (' + bundleItems.length + ' عنصر)', icon: 'copy',
     fields: [{ key: 'target', label: 'اختر وجهة النسخ', type: 'select', value: options[0] ? options[0].value : currentLesson.id, options: options }],
     onSave: function (v) {
       if (v.target === '__ALL_UNIT_LESSONS__') {
-        var r1 = copySingleResourceToTargets(resource, unitLessons);
-        if (r1.added) save();
-        toast(r1.added ? 'تم النسخ إلى ' + r1.added + ' درس في الوحدة' : 'العنصر موجود مسبقاً في جميع دروس الوحدة', r1.added ? 'ok' : 'info');
+        var r1 = copyResourcesBundleToTargets(bundleItems, unitLessons);
+        if (r1.targetsUpdated) save();
+        toast(r1.targetsUpdated ? 'تم النسخ إلى ' + r1.targetsUpdated + ' درس في الوحدة' : 'المجموعة موجودة مسبقاً في جميع دروس الوحدة', r1.targetsUpdated ? 'ok' : 'info');
         return;
       }
       if (v.target === '__ALL_UNIT_EXERCISES__') {
-        var r2 = copySingleResourceToTargets(resource, unitExercises);
-        if (r2.added) save();
-        toast(r2.added ? 'تم النسخ إلى ' + r2.added + ' تمرين في الوحدة' : 'العنصر موجود مسبقاً في جميع تمارين الوحدة', r2.added ? 'ok' : 'info');
+        var r2 = copyResourcesBundleToTargets(bundleItems, unitExercises);
+        if (r2.targetsUpdated) save();
+        toast(r2.targetsUpdated ? 'تم النسخ إلى ' + r2.targetsUpdated + ' تمرين في الوحدة' : 'المجموعة موجودة مسبقاً في جميع تمارين الوحدة', r2.targetsUpdated ? 'ok' : 'info');
         return;
       }
       var target = getLesson(data, v.target);
       if (!target) { toast('اختر وجهة صالحة', 'err'); return; }
-      var maxOrder = resourcesOf(data, target.id, resource.kind).reduce(function (m, r) { return Math.max(m, r.order || 0); }, 0);
-      data.resources.push({
-        id: uid('r'), lessonId: target.id, kind: resource.kind, title: resource.title || '',
-        url: resource.url, size: resource.size || undefined, exerciseType: resource.exerciseType || undefined,
-        order: maxOrder + 1
+      var kind = bundleItems[0].kind;
+      var maxOrder = resourcesOf(data, target.id, kind).reduce(function (m, r) { return Math.max(m, r.order || 0); }, 0);
+      var newGid = uid('g');
+      bundleItems.forEach(function (src) {
+        maxOrder++;
+        data.resources.push({
+          id: uid('r'), lessonId: target.id, kind: src.kind, title: src.title || '',
+          url: src.url, size: src.size || undefined, exerciseType: src.exerciseType || undefined,
+          groupId: src.groupId ? newGid : undefined,
+          groupTitle: src.groupTitle || undefined,
+          order: maxOrder
+        });
       });
       save();
       if (target.id === currentLesson.id) renderResourceSections(area, currentLesson, opts);
-      toast('تم نسخ المحتوى بنجاح');
+      toast('تم نسخ المجموعة بنجاح');
     }
   });
 }
 
-function copyAllCheckboxHTML(lesson, kind, exMode) {
+function copyAllCheckboxHTML(lesson, kind, exMode, draft) {
   var unitLessons = lessonsOf(data, lesson.unitId).filter(function (l) { return l.id !== lesson.id; });
   var unitExercises = unitExercisesOf(data, lesson.unitId).filter(function (x) { return x.id !== lesson.id; });
-  var itemWord = kind === 'pdf' ? (exMode ? 'الملف' : 'الملخص / الملف')
-    : (kind === 'exercise' ? 'التمرين' : (kind === 'image' ? 'الصورة' : 'الفيديو'));
+  var itemWord = kind === 'pdf' ? (exMode ? 'الملفات' : 'الملخصات / الملفات')
+    : (kind === 'exercise' ? 'التمارين' : (kind === 'image' ? 'مجموعات الصور' : 'الفيديوهات'));
 
   if (exMode) {
     var html = '<div class="copy-unit-bar">';
-    html += '<label class="copy-unit-check"><input type="checkbox" data-copy-all-ex="' + kind + '">' +
-      '<span>نسخ ' + itemWord + ' عند الإضافة إلى <b>جميع تمارين هذه الوحدة</b>' +
+    html += '<label class="copy-unit-check"><input type="checkbox" data-copy-all-ex="' + kind + '"' + (draft && draft.copyAllEx ? ' checked' : '') + '>' +
+      '<span>نسخ ' + itemWord + ' عند الحفظ إلى <b>جميع تمارين هذه الوحدة</b>' +
       (unitExercises.length ? ' (' + unitExercises.length + ' تمرين آخر)' : '') + '</span></label>';
     if (unitLessons.length) {
-      html += '<label class="copy-unit-check"><input type="checkbox" data-copy-all="' + kind + '">' +
+      html += '<label class="copy-unit-check"><input type="checkbox" data-copy-all="' + kind + '"' + (draft && draft.copyAllLessons ? ' checked' : '') + '>' +
         '<span>نسخ أيضاً إلى <b>جميع دروس الوحدة</b> (' + unitLessons.length + ' درس)</span></label>';
     }
     html += '</div>';
@@ -1461,146 +2304,11 @@ function copyAllCheckboxHTML(lesson, kind, exMode) {
 
   return '<div class="copy-unit-bar">' +
     '<label class="copy-unit-check">' +
-      '<input type="checkbox" data-copy-all="' + kind + '">' +
-      '<span>نسخ ' + itemWord + ' تلقائياً عند الإضافة إلى <b>جميع الدروس داخل هذه الوحدة</b>' +
+      '<input type="checkbox" data-copy-all="' + kind + '"' + (draft && draft.copyAllLessons ? ' checked' : '') + '>' +
+      '<span>نسخ ' + itemWord + ' تلقائياً عند الحفظ إلى <b>جميع الدروس داخل هذه الوحدة</b>' +
       (unitLessons.length ? ' (' + unitLessons.length + ' درس آخر)' : ' (عند وجود أكثر من درس في الوحدة)') + '</span>' +
     '</label>' +
   '</div>';
-}
-
-function resSectionHTML(lesson, kind, title, accept, urlPlaceholder, exMode) {
-  var meta = KIND_META[kind];
-  var items = resourcesOf(data, lesson.id, kind);
-
-  return '<h3 class="sub-title">' + svgIcon(meta.icon) + ' ' + title +
-      ' <span class="cnt">' + items.length + '</span></h3>' +
-    '<div class="frm-card">' +
-      '<div class="frm-row">' +
-        '<input class="inp" data-title="' + kind + '" placeholder="العنوان (مثال: ' + (kind === 'pdf' ? 'ملخص شامل للوحدة' : 'الجزء الأول') + ')">' +
-        '<input class="inp" data-url="' + kind + '" dir="ltr" placeholder="' + urlPlaceholder + '">' +
-        fileLabelHTML(kind, accept) +
-        '<button class="btn btn-primary" id="add-' + kind + '">' + svgIcon('plus') + ' إضافة</button>' +
-      '</div>' +
-      copyAllCheckboxHTML(lesson, kind, exMode) +
-    '</div>' +
-    '<div class="admin-list" id="list-' + kind + '">' +
-      (items.length ? items.map(function (r) { return resRowHTML(r); }).join('')
-        : '<div class="empty">لا يوجد محتوى من هذا النوع بعد</div>') +
-    '</div>';
-}
-
-function exSectionHTML(lesson) {
-  var items = resourcesOf(data, lesson.id, 'exercise');
-  return '<h3 class="sub-title">' + svgIcon('pencil') + ' التمارين المرفقة بالدرس <span class="cnt">' + items.length + '</span></h3>' +
-    '<div class="frm-card">' +
-      '<div class="frm-row">' +
-        '<input class="inp" data-title="exercise" placeholder="عنوان التمرين (مثال: سلسلة تمارين رقم 1)">' +
-        '<select class="inp" id="ex-type">' +
-          '<option value="pdf">تمرين PDF</option>' +
-          '<option value="video">تمرين فيديو (يُشغَّل في المشغل)</option>' +
-          '<option value="image">تمرين صورة (يُعرض بمكبّر الصور)</option>' +
-          '<option value="link">رابط موقع</option>' +
-        '</select>' +
-        '<input class="inp" data-url="exercise" dir="ltr" placeholder="الرابط (أو ارفع ملفاً)">' +
-        fileLabelHTML('exercise', 'video/*,image/*,application/pdf,.pdf') +
-        '<button class="btn btn-primary" id="add-exercise">' + svgIcon('plus') + ' إضافة</button>' +
-      '</div>' +
-      copyAllCheckboxHTML(lesson, 'exercise', false) +
-    '</div>' +
-    '<div class="admin-list" id="list-exercise">' +
-      (items.length ? items.map(function (r) { return resRowHTML(r); }).join('')
-        : '<div class="empty">لا توجد تمارين مرفقة بهذا الدرس بعد</div>') +
-    '</div>';
-}
-
-function resRowHTML(r) {
-  var meta = KIND_META[r.kind];
-  var src, rtl = false;
-  if (isSbUrl(r.url)) { src = svgIcon('cloud') + ' ملف في السحابة' + (r.size ? ' (' + fmtSize(r.size) + ')' : ''); rtl = true; }
-  else if (isIdbUrl(r.url)) { src = svgIcon('folder') + ' ملف مرفوع' + (r.size ? ' (' + fmtSize(r.size) + ')' : ''); rtl = true; }
-  else if (youtubeId(r.url)) { src = svgIcon('film') + ' يوتيوب'; rtl = true; }
-  else { src = svgIcon('link') + ' رابط خارجي'; rtl = true; }
-
-  var typeLbl = r.kind === 'exercise' && r.exerciseType
-    ? ' — ' + ({ video: 'فيديو', pdf: 'PDF', image: 'صورة', link: 'رابط' }[r.exerciseType] || r.exerciseType)
-    : '';
-
-  return '<div class="item-row">' +
-    '<div class="item-ico">' + svgIcon(meta.icon) + '</div>' +
-    '<div class="item-info"><div class="item-title">' + escapeHtml(r.title || meta.label) + typeLbl + '</div>' +
-    '<div class="item-sub"' + (rtl ? ' dir="rtl" style="text-align:right"' : '') + '>' + src + '</div></div>' +
-    actsHTML(r.id,
-      '<button class="btn-mini-copy" data-act="copy-all-unit" data-id="' + r.id + '" title="نسخ هذا العنصر إلى جميع الدروس داخل الوحدة">' +
-        svgIcon('copy') + '<span>نسخ لكل دروس الوحدة</span>' +
-      '</button>' +
-      '<button class="icon-btn" data-act="view" data-id="' + r.id + '" title="معاينة">' + svgIcon('eye') + '</button>' +
-      '<button class="icon-btn" data-act="copy" data-id="' + r.id + '" title="نسخ إلى وجهة محددة">' + svgIcon('copy') + '</button>') +
-  '</div>';
-}
-
-function addResource(area, lesson, kind, exerciseType, opts) {
-  var titleInp = $('input[data-title="' + kind + '"]', area);
-  var urlInp = $('input[data-url="' + kind + '"]', area);
-  var copyAllLessonsChk = $('input[data-copy-all="' + kind + '"]', area);
-  var copyAllExChk = $('input[data-copy-all-ex="' + kind + '"]', area);
-  var copyToUnitLessons = !!(copyAllLessonsChk && copyAllLessonsChk.checked);
-  var copyToUnitExs = !!(copyAllExChk && copyAllExChk.checked);
-
-  var title = titleInp.value.trim();
-  var url = urlInp.value.trim();
-  var file = pickedFiles[kind] || null;
-
-  if (!file && !url) { toast('الصق رابطاً أو اختر ملفاً للرفع', 'err'); return; }
-
-  var maxOrder = resourcesOf(data, lesson.id, kind).reduce(function (m, r) { return Math.max(m, r.order || 0); }, 0);
-
-  function finalizeAdd(finalUrl, finalTitle, finalSize) {
-    var created = {
-      id: uid('r'), lessonId: lesson.id, kind: kind,
-      title: finalTitle,
-      url: finalUrl,
-      size: finalSize || undefined,
-      exerciseType: exerciseType || undefined,
-      order: maxOrder + 1
-    };
-    data.resources.push(created);
-
-    var copiedLessons = 0, copiedExs = 0;
-    if (copyToUnitLessons) {
-      var otherLessons = lessonsOf(data, lesson.unitId).filter(function (l) { return l.id !== lesson.id; });
-      copiedLessons = copySingleResourceToTargets(created, otherLessons).added;
-    }
-    if (copyToUnitExs) {
-      var otherExs = unitExercisesOf(data, lesson.unitId).filter(function (x) { return x.id !== lesson.id; });
-      copiedExs = copySingleResourceToTargets(created, otherExs).added;
-    }
-
-    save();
-    titleInp.value = ''; urlInp.value = '';
-    clearPick(kind);
-    renderResourceSections(area, lesson, opts);
-
-    if (copiedLessons > 0 || copiedExs > 0) {
-      var parts = [];
-      if (copiedLessons > 0) parts.push(copiedLessons + ' درس');
-      if (copiedExs > 0) parts.push(copiedExs + ' تمرين');
-      toast('تمت الإضافة ونسخها تلقائياً إلى ' + parts.join(' و ') + ' داخل الوحدة');
-    } else if (copyToUnitLessons || copyToUnitExs) {
-      toast('تمت الإضافة (لا توجد عناصر أخرى في الوحدة لنسخها إليها حالياً)', 'info');
-    } else {
-      toast(file ? 'تم رفع الملف وإضافته' : 'تمت الإضافة');
-    }
-  }
-
-  if (file) {
-    filePut(file).then(function (fid) {
-      finalizeAdd(fid, title || file.name.replace(/\.[^.]+$/, ''), file.size);
-    }).catch(function () {
-      toast('تعذّر رفع الملف (مساحة غير كافية؟)', 'err');
-    });
-  } else {
-    finalizeAdd(url, title || guessFileName(url), null);
-  }
 }
 
 /* ---------- لوحة النسخ الاحتياطي ---------- */

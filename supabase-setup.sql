@@ -50,8 +50,14 @@ create table if not exists public.resources (
   url           text not null,          -- رابط مباشر / يوتيوب / sb:ملف مرفوع
   size          bigint,
   exercise_type text,                   -- video | pdf | image | link
+  group_id      text,                   -- معرّف الفقرة/المجموعة الديناميكية (عنوان يضم عنصراً أو عدة عناصر)
+  group_title   text,                   -- عنوان الفقرة/المجموعة الظاهر فوق عناصرها
   sort_order    int  not null default 0
 );
+
+-- ترقية تلقائية آمنة إن كان جدول الموارد منشأً مسبقاً بدون أعمدة المجموعات الديناميكية
+alter table public.resources add column if not exists group_id text;
+alter table public.resources add column if not exists group_title text;
 
 -- ---------- 2) تفعيل الحماية (RLS) ----------
 alter table public.subjects  enable row level security;

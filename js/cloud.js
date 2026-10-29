@@ -139,16 +139,29 @@ Cloud._sync = function (data) {
     if (!t.rows.length) return;
     jobs.push(c.from(t.name).upsert(t.rows, { onConflict: 'id' }).then(function (res) {
       if (res && res.error) {
-        /* توافق رجعي آمن إذا لم يُضف عمود item_type بعد في قاعدة خارجية قديمة */
-        if (t.name === 'lessons' && /item_type/i.test(String(res.error.message || ''))) {
-          var legacyRows = t.rows.map(function (r) {
+        var errMsg = String(res.error.message || '');
+        /* توافق رجعي آمن إذا لم يُضف عمود item_type أو group_id بعد في قاعدة خارجية قديمة */
+        if (t.name === 'lessons' && /item_type/i.test(errMsg)) {
+          var legacyLessons = t.rows.map(function (r) {
             return { id: r.id, unit_id: r.unit_id, title: r.title, sort_order: r.sort_order };
           });
-          return c.from(t.name).upsert(legacyRows, { onConflict: 'id' }).then(function (res2) {
+          return c.from(t.name).upsert(legacyLessons, { onConflict: 'id' }).then(function (res2) {
             if (res2 && res2.error) throw new Error(t.name + ': ' + res2.error.message);
           });
         }
-        throw new Error(t.name + ': ' + res.error.message);
+        if (t.name === 'resources' && /group_id|group_title/i.test(errMsg)) {
+          var legacyRes = t.rows.map(function (r) {
+            return {
+              id: r.id, lesson_id: r.lesson_id, kind: r.kind,
+              title: r.title, url: r.url, size: r.size,
+              exercise_type: r.exercise_type, sort_order: r.sort_order
+            };
+          });
+          return c.from(t.name).upsert(legacyRes, { onConflict: 'id' }).then(function (res3) {
+            if (res3 && res3.error) throw new Error(t.name + ': ' + res3.error.message);
+          });
+        }
+        throw new Error(t.name + ': ' + errMsg);
       }
     }));
   });
@@ -232,7 +245,10 @@ function resourceToRow(r) {
   return {
     id: r.id, lesson_id: r.lessonId, kind: r.kind,
     title: r.title || '', url: r.url, size: r.size || null,
-    exercise_type: r.exerciseType || null, sort_order: r.order || 0
+    exercise_type: r.exerciseType || null,
+    group_id: r.groupId || null,
+    group_title: r.groupTitle || null,
+    sort_order: r.order || 0
   };
 }
 function rowToSubject(r)  { return { id: r.id, name: r.name, icon: r.icon, color: r.color, order: r.sort_order }; }
@@ -244,7 +260,10 @@ function rowToLesson(r) {
 function rowToResource(r) {
   return {
     id: r.id, lessonId: r.lesson_id, kind: r.kind, title: r.title,
-    url: r.url, size: r.size, exerciseType: r.exercise_type, order: r.sort_order
+    url: r.url, size: r.size, exerciseType: r.exercise_type,
+    groupId: r.group_id || undefined,
+    groupTitle: r.group_title || undefined,
+    order: r.sort_order
   };
 }
 

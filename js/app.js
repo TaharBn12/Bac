@@ -184,6 +184,43 @@ function resourcesOf(data, lessonId, kind) {
     return r.lessonId === lessonId && (!kind || r.kind === kind);
   }).sort(byOrder);
 }
+
+/* تجميع الموارد المرتبة في فقرات/مجموعات ديناميكية (عنوان + عنصر أو عدة عناصر) */
+function groupResources(items) {
+  var groups = [];
+  var byGroupId = {};
+  (items || []).forEach(function (item) {
+    if (!item) return;
+    if (item.groupId) {
+      var g = byGroupId[item.groupId];
+      if (!g) {
+        g = {
+          id: item.groupId,
+          groupId: item.groupId,
+          isExplicit: true,
+          title: item.groupTitle || item.title || '',
+          exerciseType: item.exerciseType || '',
+          items: []
+        };
+        byGroupId[item.groupId] = g;
+        groups.push(g);
+      } else if (!g.title && (item.groupTitle || item.title)) {
+        g.title = item.groupTitle || item.title;
+      }
+      g.items.push(item);
+    } else {
+      groups.push({
+        id: 'single-' + item.id,
+        groupId: '',
+        isExplicit: false,
+        title: item.groupTitle || item.title || '',
+        exerciseType: item.exerciseType || '',
+        items: [item]
+      });
+    }
+  });
+  return groups;
+}
 function lessonPath(data, lessonId) {
   var lesson = getLesson(data, lessonId);
   if (!lesson) return null;
