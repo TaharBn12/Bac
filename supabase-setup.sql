@@ -35,8 +35,12 @@ create table if not exists public.lessons (
   id         text primary key,
   unit_id    text not null references public.units(id) on delete cascade,
   title      text not null,
+  item_type  text not null default 'lesson', -- lesson | exercise (درس أو تمرين مستقل داخل الوحدة)
   sort_order int  not null default 0
 );
+
+-- ترقية تلقائية آمنة إن كان الجدول منشأً مسبقاً بدون عمود item_type
+alter table public.lessons add column if not exists item_type text not null default 'lesson';
 
 create table if not exists public.resources (
   id            text primary key,
@@ -45,7 +49,7 @@ create table if not exists public.resources (
   title         text,
   url           text not null,          -- رابط مباشر / يوتيوب / sb:ملف مرفوع
   size          bigint,
-  exercise_type text,                   -- video | pdf | link
+  exercise_type text,                   -- video | pdf | image | link
   sort_order    int  not null default 0
 );
 

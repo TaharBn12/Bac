@@ -959,3 +959,147 @@ select.inp option[value=''] { color: var(--muted); }
   .ai-msg { max-width: 100%; }
 }
 
+/* ============ اختيارا الوحدة (الدروس | التمارين) + شريط التبديل ============ */
+.unit-choices {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px; margin-top: 22px;
+}
+.unit-choice-card {
+  position: relative; display: flex; align-items: flex-start; gap: 18px;
+  padding: 26px 24px; border-radius: 20px; text-decoration: none; color: var(--text);
+  background: var(--card); border: 1px solid var(--border);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.25);
+  transition: transform 0.22s ease, border-color 0.22s ease, background 0.22s ease, box-shadow 0.22s ease;
+  overflow: hidden;
+}
+.unit-choice-card::before {
+  content: ''; position: absolute; inset-inline: 0; top: 0; height: 4px;
+  background: var(--sc, linear-gradient(135deg, var(--accent-2), var(--accent)));
+  opacity: 0.9;
+}
+.unit-choice-card.choice-exercises::before {
+  background: linear-gradient(135deg, var(--accent), #ff9e3d);
+}
+.unit-choice-card:hover {
+  transform: translateY(-4px);
+  background: var(--card-hover);
+  border-color: rgba(245, 197, 66, 0.45);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.36);
+}
+.uc-ico {
+  width: 66px; height: 66px; border-radius: 18px; flex: 0 0 auto;
+  display: grid; place-items: center;
+  background: var(--sc, linear-gradient(135deg, var(--accent-2), #5b8cff));
+  color: #fff; box-shadow: 0 10px 24px rgba(0, 0, 0, 0.3);
+}
+.choice-exercises .uc-ico {
+  background: linear-gradient(135deg, var(--accent), #ff9e3d);
+  color: #1a1440;
+}
+.uc-ico .ic { width: 32px; height: 32px; }
+.uc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.uc-title { font-size: clamp(20px, 3vw, 24px); font-weight: 900; line-height: 1.25; }
+.uc-desc { font-size: 13.8px; color: var(--muted); line-height: 1.65; margin: 0; }
+.uc-foot {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 10px; flex-wrap: wrap; margin-top: 10px; padding-top: 12px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+.uc-enter { font-size: 13.5px; font-weight: 800; color: var(--accent); transition: transform 0.2s; }
+.unit-choice-card:hover .uc-enter { transform: translateX(-4px); }
+
+/* شريط التبديل السريع بين الدروس والتمارين داخل الوحدة */
+.unit-switch {
+  display: flex; gap: 10px; flex-wrap: wrap; margin-top: 18px;
+}
+.unit-switch-btn {
+  flex: 1 1 180px; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 11px 18px; border-radius: 13px; text-decoration: none;
+  background: var(--card); border: 1px solid var(--border); color: var(--muted);
+  font-size: 14.5px; font-weight: 800; transition: 0.2s;
+}
+.unit-switch-btn .ic { width: 18px; height: 18px; }
+.unit-switch-btn .cnt {
+  padding: 1px 9px; border-radius: 999px; font-size: 12px;
+  background: rgba(255, 255, 255, 0.08); color: var(--text);
+}
+.unit-switch-btn:hover { color: var(--text); border-color: rgba(255, 255, 255, 0.25); }
+.unit-switch-btn.active {
+  background: linear-gradient(135deg, var(--accent-2), #5b8cff);
+  color: #fff; border-color: transparent;
+  box-shadow: 0 8px 22px rgba(124, 92, 255, 0.32);
+}
+.unit-switch-btn.active .cnt { background: rgba(255, 255, 255, 0.22); color: #fff; }
+
+.exercise-row-card .num {
+  background: linear-gradient(135deg, var(--accent), #ff9e3d);
+  color: #1a1440;
+}
+.ex-image .ex-icon {
+  background: linear-gradient(135deg, #ec4899, #f97316);
+  color: #fff;
+}
+
+/* ============ تبويب التمارين ونسخ المحتوى لجميع دروس الوحدة في لوحة التحكم ============ */
+.copy-unit-bar {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center;
+  margin-top: 12px; padding-top: 11px; border-top: 1px dashed rgba(255, 255, 255, 0.12);
+}
+.copy-unit-check {
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+  font-size: 13px; color: var(--muted); user-select: none;
+}
+.copy-unit-check input[type='checkbox'] {
+  width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; flex: 0 0 auto;
+}
+.copy-unit-check b { color: var(--accent); font-weight: 800; }
+
+.btn-mini-copy {
+  display: inline-flex; align-items: center; gap: 5px; height: 33px; padding: 0 10px;
+  border-radius: 9px; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 800;
+  border: 1px solid rgba(245, 197, 66, 0.36);
+  background: rgba(245, 197, 66, 0.11); color: var(--accent);
+  white-space: nowrap; transition: 0.16s;
+}
+.btn-mini-copy .ic { width: 14px; height: 14px; }
+.btn-mini-copy:hover, .btn-mini-copy.on {
+  background: linear-gradient(135deg, var(--accent), #ffb347);
+  color: #1a1440; border-color: transparent;
+}
+
+.ex-admin-row { cursor: pointer; transition: border-color 0.18s, background 0.18s; }
+.ex-admin-row:hover { border-color: rgba(255, 255, 255, 0.22); }
+.ex-admin-row.active-ex-row {
+  border-color: var(--accent);
+  background: linear-gradient(135deg, rgba(245, 197, 66, 0.1), rgba(124, 92, 255, 0.1));
+}
+.ex-active-pill {
+  display: inline-block; font-size: 11px; font-weight: 800; padding: 2px 8px;
+  border-radius: 999px; background: rgba(245, 197, 66, 0.2); color: var(--accent);
+  margin-inline-start: 6px; vertical-align: middle;
+}
+.ex-editor-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+  margin-top: 26px; padding: 15px 18px; border-radius: var(--radius);
+  background: linear-gradient(135deg, rgba(245, 197, 66, 0.14), rgba(124, 92, 255, 0.16));
+  border: 1px solid rgba(245, 197, 66, 0.38);
+}
+.ex-editor-title { display: flex; align-items: center; gap: 11px; }
+.ex-editor-title > .ic { width: 24px; height: 24px; color: var(--accent); flex: 0 0 auto; }
+.ex-editor-title strong { display: block; font-size: 15.5px; font-weight: 900; }
+.ex-editor-title small { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.ex-editor-acts { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+
+.tree-exercise { border: 1px dashed rgba(245, 197, 66, 0.25); background: rgba(245, 197, 66, 0.045); }
+.tree-meta-ex { color: var(--accent); background: rgba(245, 197, 66, 0.14); }
+
+@media (max-width: 720px) {
+  .unit-choices { grid-template-columns: 1fr; gap: 14px; }
+  .unit-choice-card { padding: 20px 18px; gap: 14px; }
+  .uc-ico { width: 56px; height: 56px; border-radius: 15px; }
+  .uc-ico .ic { width: 27px; height: 27px; }
+  .item-row { flex-wrap: wrap; }
+  .item-acts { width: 100%; justify-content: flex-end; flex-wrap: wrap; padding-top: 6px; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+}
+
+
