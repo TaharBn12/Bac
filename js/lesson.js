@@ -586,22 +586,68 @@ function initLessonPage() {
   var exEl = $('#exBtns');
   if (exs.length) {
     var exGroups = typeof groupResources === 'function' ? groupResources(exs) : exs.map(function (x) { return { isExplicit: false, title: x.title, exerciseType: x.exerciseType, items: [x] }; });
-    var hasMultiExGroups = exGroups.some(function (g) { return g.items.length > 1 || (g.isExplicit && (g.exerciseType || g.items[0].exerciseType) === 'image'); });
-    if (hasMultiExGroups) exEl.classList.add('ex-groups-mixed');
+    var hasImageExGroups = exGroups.some(function (g) {
+      return (g.exerciseType || (g.items[0] && g.items[0].exerciseType)) === 'image';
+    });
+    var hasCardExGroups = hasImageExGroups || exGroups.some(function (g) { return g.items.length > 1; });
+    if (hasCardExGroups) exEl.classList.add('ex-groups-mixed');
+
+    /* شريط رأس قسم التمارين: تبديل (صفحات واضحة / شبكة) + رابط سريع لصفحة تمارين الوحدة المستقلة إن وجدت */
+    var exSecHead = $('#exSection > h2');
+    var standaloneUnitExs = (!isExPage && typeof unitExercisesOf === 'function' && unit) ? unitExercisesOf(data, unit.id) : [];
+    if (exSecHead && exSecHead.parentNode && (hasImageExGroups || standaloneUnitExs.length)) {
+      var exHeadBar = document.createElement('div');
+      exHeadBar.className = 'sec-head-bar';
+      exSecHead.parentNode.insertBefore(exHeadBar, exSecHead);
+      exHeadBar.appendChild(exSecHead);
+
+      var exHeadTools = document.createElement('div');
+      exHeadTools.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap';
+
+      if (standaloneUnitExs.length) {
+        var unitExLink = document.createElement('a');
+        unitExLink.className = 'btn btn-sm';
+        unitExLink.href = 'unit.html?unit=' + encodeURIComponent(unit.id) + '&section=exercises';
+        unitExLink.innerHTML = svgIcon('pencil') + ' صفحة تمارين الوحدة (' + standaloneUnitExs.length + ')';
+        exHeadTools.appendChild(unitExLink);
+      }
+
+      if (hasImageExGroups) {
+        var exDefaultStack = true;
+        exEl.classList.toggle('img-view-stack', exDefaultStack);
+        var exModeSwitch = document.createElement('div');
+        exModeSwitch.className = 'img-mode-switch';
+        exModeSwitch.innerHTML =
+          '<button type="button" class="img-mode-btn' + (exDefaultStack ? ' active' : '') + '" data-imode="stack">' +
+            svgIcon('layers') + ' صفحات واضحة</button>' +
+          '<button type="button" class="img-mode-btn' + (!exDefaultStack ? ' active' : '') + '" data-imode="grid">' +
+            svgIcon('image') + ' شبكة</button>';
+        exModeSwitch.addEventListener('click', function (e) {
+          var b = e.target.closest('[data-imode]');
+          if (!b) return;
+          var isStack = b.dataset.imode === 'stack';
+          $all('.img-mode-btn', exModeSwitch).forEach(function (x) { x.classList.toggle('active', x === b); });
+          exEl.classList.toggle('img-view-stack', isStack);
+        });
+        exHeadTools.appendChild(exModeSwitch);
+      }
+
+      exHeadBar.appendChild(exHeadTools);
+    }
 
     exGroups.forEach(function (eg, gIdx) {
       var type = eg.exerciseType || (eg.items[0] && eg.items[0].exerciseType) || 'link';
       var gTitle = eg.title || (eg.items[0] && eg.items[0].title) || ('تمرين ' + (gIdx + 1));
 
-      /* حالة تمرين مصوّر يحتوي عدة صور (أو مجموعة صور ديناميكية) */
-      if (type === 'image' && (eg.items.length > 1 || eg.isExplicit)) {
+      /* حالة تمرين مصوّر (صورة واحدة أو عدة صور متتالية تحت نفس العنوان الديناميكي) */
+      if (type === 'image') {
         var exImgSlots = new Array(eg.items.length);
         var exCard = document.createElement('div');
         exCard.className = 'media-group-card ex-inline-group';
         exCard.innerHTML =
           '<div class="media-group-head">' +
             '<div class="media-group-title"><span class="mg-num">' + (gIdx + 1) + '</span><h3>' + escapeHtml(gTitle) + '</h3></div>' +
-            '<div style="display:flex;align-items:center;gap:8px">' +
+            '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">' +
               '<span class="badge on">' + svgIcon('image') + ' ' +
                 (eg.items.length === 1 ? 'صورة واحدة' : (eg.items.length === 2 ? 'صورتان' : eg.items.length + ' صور')) +
               '</span>' +
