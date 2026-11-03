@@ -524,6 +524,8 @@ input[type='range'].vp-range::-moz-range-thumb {
 
 .remember { display: flex; align-items: center; gap: 8px; margin: 14px 2px 18px; font-size: 13.5px; color: var(--muted); cursor: pointer; }
 .remember input { accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer; }
+.remember.muted { opacity: 0.55; cursor: not-allowed; }
+.remember input:disabled { cursor: not-allowed; }
 
 .error-msg {
   background: rgba(255, 93, 122, 0.12); border: 1px solid rgba(255, 93, 122, 0.4);
@@ -837,6 +839,8 @@ select.inp option[value=''] { color: var(--muted); }
   display: flex; align-items: flex-start; justify-content: space-between;
   gap: 12px; flex-wrap: wrap; padding-bottom: 13px; border-bottom: 1px solid var(--border);
 }
+.ai-preview-top > div { min-width: 0; max-width: 100%; }
+.ai-preview-top .item-sub { white-space: normal; overflow-wrap: anywhere; }
 .ai-subj-bar {
   display: flex; gap: 12px; flex-wrap: wrap; margin-top: 14px;
   padding: 12px; border-radius: 13px; background: rgba(0, 0, 0, 0.22);
@@ -951,6 +955,8 @@ select.inp option[value=''] { color: var(--muted); }
 .ai-chat-form .inp { flex: 1; }
 
 @media (max-width: 640px) {
+  .ai-lesson-head { flex-wrap: wrap; }
+  .ai-lesson-head .inp { flex-basis: 100%; }
   .ai-vid-list { padding-inline-start: 0; }
   .ai-vid-row { flex-wrap: wrap; }
   .ai-item-inp { min-width: 100%; order: 3; }
