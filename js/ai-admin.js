@@ -15,6 +15,7 @@ var aiDraftState = {
   playlist: null,
   plan: null,
   mode: 'smart',
+  groupingMode: 'smart', /* تنظيم المسودة الحالية، منفصل عن مزود التحليل */
   lastResult: null,
   form: {
     url: '',
@@ -221,10 +222,15 @@ function renderPlaylistImporterView(box) {
           '<select class="inp" id="ytGroupMode">' +
             '<option value="smart"' + (f.groupingMode === 'smart' ? ' selected' : '') + '>تجميع ذكي للدروس (يدمج أجزاء الدرس ويفصل التمارين)</option>' +
             '<option value="per_video"' + (f.groupingMode === 'per_video' ? ' selected' : '') + '>كل فيديو في درس مستقل بالترتيب</option>' +
+            '<option value="single_unit"' + (f.groupingMode === 'single_unit' ? ' selected' : '') + '>كل الفيديوهات في وحدة واحدة (الدروس والتمارين معاً دون فصل)</option>' +
             '<option value="unit_exercises"' + (f.groupingMode === 'unit_exercises' ? ' selected' : '') + '>✏️ استيراد كل فيديو كتمرين مستقل في قسم «تمارين الوحدة»</option>' +
             '<option value="single_lesson"' + (f.groupingMode === 'single_lesson' ? ' selected' : '') + '>وضع كل الفيديوهات داخل درس واحد</option>' +
           '</select>' +
         '</label>' +
+
+        '<p class="hint ai-col-full" id="ytGroupModeHint" style="margin:0" hidden>' +
+          'كل فيديو، بما فيه التمارين وحلول البكالوريا، يُضاف كدرس مستقل داخل وحدة واحدة وبنفس ترتيب القائمة. اختر الوحدة أعلاه أو اكتب اسم وحدة جديدة؛ وإلا تُستخدم وحدة باسم القائمة. لن تُنقل أي فيديوهات إلى قسم التمارين.' +
+        '</p>' +
 
         '<label class="field ai-col-full">' +
           '<span>' + svgIcon('wand') + ' ملاحظات إضافية للذكاء الاصطناعي (اختياري)</span>' +
@@ -232,7 +238,7 @@ function renderPlaylistImporterView(box) {
         '</label>' +
       '</div>' +
 
-      '<label class="remember" style="margin:8px 0 14px">' +
+      '<label class="remember" id="ytSepExWrap" style="margin:8px 0 14px">' +
         '<input type="checkbox" id="ytSepEx"' + (f.separateExercises ? ' checked' : '') + '>' +
         'وضع فيديوهات «التمارين / التطبيقات / حلول البكالوريا» تلقائياً في بطاقات التمارين التابعة للدرس' +
       '</label>' +
@@ -273,6 +279,30 @@ function renderPlaylistImporterView(box) {
 
   refreshUnitDropdown();
 
+  var groupSel = $('#ytGroupMode', box);
+  var separateInp = $('#ytSepEx', box);
+  function refreshGroupingMode() {
+    var singleUnit = groupSel.value === 'single_unit';
+    $('#ytGroupModeHint', box).hidden = !singleUnit;
+    groupSel.disabled = aiDraftState.loading;
+    separateInp.disabled = singleUnit || aiDraftState.loading;
+    separateInp.checked = !singleUnit && f.separateExercises;
+    $('#ytSepExWrap', box).classList.toggle('muted', singleUnit);
+  }
+  refreshGroupingMode();
+  groupSel.addEventListener('change', function () {
+    f.groupingMode = this.value;
+    refreshGroupingMode();
+    /* لا تعرض مسودة قديمة بعد تغيير طريقة التنظيم. */
+    aiDraftState.plan = null;
+    aiDraftState.playlist = null;
+    aiDraftState.lastResult = null;
+    renderPlaylistPlanPreview($('#ytResultArea', box));
+  });
+  separateInp.addEventListener('change', function () {
+    f.separateExercises = this.checked;
+  });
+
   subjSel.addEventListener('change', function () {
     f.subjectChoice = this.value;
     refreshUnitDropdown();
@@ -289,7 +319,7 @@ function renderPlaylistImporterView(box) {
     f.unitChoice = unitSel.value;
     f.customUnitTitle = $('#ytCustomUnitInp', box).value.trim();
     f.groupingMode = $('#ytGroupMode', box).value;
-    f.separateExercises = $('#ytSepEx', box).checked;
+    if (f.groupingMode !== 'single_unit') f.separateExercises = $('#ytSepEx', box).checked;
     f.instructions = $('#ytAiNotes', box).value.trim();
 
     if (!f.url) {
@@ -313,7 +343,9 @@ function runPlaylistAnalysis(box) {
   if (f.unitChoice === '__new__') unitParam = f.customUnitTitle;
   else if (f.unitChoice !== '__auto__') unitParam = f.unitChoice;
 
+  var requestedGroupingMode = f.groupingMode;
   aiDraftState.loading = true;
+  aiDraftState.groupingMode = requestedGroupingMode;
   aiDraftState.lastResult = null;
   renderPlaylistImporterView(box);
 
@@ -328,7 +360,7 @@ function runPlaylistAnalysis(box) {
       subjectId: subjectParam || undefined,
       unitId: unitParam || undefined,
       groupingMode: f.groupingMode,
-      separateExercises: f.separateExercises,
+      separateExercises: f.groupingMode === 'single_unit' ? false : f.separateExercises,
       instructions: f.instructions || undefined,
       anthropicKey: getSavedClaudeApiKey() || undefined
     })
@@ -340,7 +372,8 @@ function runPlaylistAnalysis(box) {
         throw new Error((res && res.error) || 'تعذّر تحليل قائمة التشغيل');
       }
       aiDraftState.playlist = res.playlist;
-      aiDraftState.plan = prepareEditablePlan(res.plan);
+      aiDraftState.groupingMode = requestedGroupingMode;
+      aiDraftState.plan = prepareEditablePlan(res.plan, requestedGroupingMode);
       aiDraftState.mode = res.mode || 'smart';
       toast('تم جلب ' + res.playlist.video_count + ' فيديو وتقسيمها بنجاح!');
       renderPlaylistImporterView(box);
@@ -352,17 +385,19 @@ function runPlaylistAnalysis(box) {
     });
 }
 
-function prepareEditablePlan(plan) {
+function prepareEditablePlan(plan, groupingMode) {
+  var singleUnit = (groupingMode || aiDraftState.groupingMode) === 'single_unit';
   var cloned = JSON.parse(JSON.stringify(plan || { subject: { name: '' }, units: [] }));
   (cloned.units || []).forEach(function (u) {
     (u.lessons || []).forEach(function (l) {
       l._enabled = true;
+      if (singleUnit) l.item_type = 'lesson';
       var combined = [];
       (l.videos || []).forEach(function (v) {
         combined.push({ title: v.title, url: v.url, role: 'video', enabled: true });
       });
       (l.exercises || []).forEach(function (ex) {
-        combined.push({ title: ex.title, url: ex.url, role: 'exercise', enabled: true });
+        combined.push({ title: ex.title, url: ex.url, role: singleUnit ? 'video' : 'exercise', enabled: true });
       });
       l._items = combined;
     });
@@ -370,7 +405,8 @@ function prepareEditablePlan(plan) {
   return cloned;
 }
 
-function buildFinalPlanFromEditable(edPlan) {
+function buildFinalPlanFromEditable(edPlan, groupingMode) {
+  var singleUnit = (groupingMode || aiDraftState.groupingMode) === 'single_unit';
   return {
     subject: edPlan.subject,
     skip_duplicate_urls: true,
@@ -380,7 +416,7 @@ function buildFinalPlanFromEditable(edPlan) {
         var exercises = [];
         (l._items || []).forEach(function (it) {
           if (!it.enabled) return;
-          if (it.role === 'exercise') {
+          if (it.role === 'exercise' && !singleUnit) {
             exercises.push({ title: it.title.trim() || l.title.trim(), url: it.url, exercise_type: 'video' });
           } else {
             videos.push({ title: it.title.trim() || l.title.trim(), url: it.url });
@@ -389,7 +425,7 @@ function buildFinalPlanFromEditable(edPlan) {
         return {
           id: l.id || undefined,
           title: l.title.trim(),
-          item_type: l.item_type === 'exercise' ? 'exercise' : 'lesson',
+          item_type: !singleUnit && l.item_type === 'exercise' ? 'exercise' : 'lesson',
           videos: videos,
           exercises: exercises
         };
@@ -439,6 +475,7 @@ function renderPlaylistPlanPreview(area) {
 
   var sortedSubjects = data.subjects.slice().sort(byOrder);
   var matchedExistingSubj = plan.subject.id ? getSubject(data, plan.subject.id) : null;
+  var singleUnit = aiDraftState.groupingMode === 'single_unit';
 
   var totalLessons = 0, totalVids = 0, totalExs = 0;
   (plan.units || []).forEach(function (u) {
@@ -458,7 +495,7 @@ function renderPlaylistPlanPreview(area) {
         var isEx = it.role === 'exercise';
         return '<div class="ai-vid-row' + (it.enabled ? '' : ' muted') + '">' +
           '<input type="checkbox" data-act="toggle-item" data-u="' + uIdx + '" data-l="' + lIdx + '" data-i="' + iIdx + '"' + (it.enabled ? ' checked' : '') + '>' +
-          '<button type="button" class="ai-role-chip ' + (isEx ? 'ex' : 'vid') + '" data-act="flip-role" data-u="' + uIdx + '" data-l="' + lIdx + '" data-i="' + iIdx + '" title="اضغط للتبديل بين فيديو درس وتمرين">' +
+          '<button type="button" class="ai-role-chip ' + (isEx ? 'ex' : 'vid') + '" data-act="flip-role" data-u="' + uIdx + '" data-l="' + lIdx + '" data-i="' + iIdx + '"' + (singleUnit ? ' disabled title="كل الفيديوهات تبقى مع الدروس في وضع الوحدة الواحدة"' : ' title="اضغط للتبديل بين فيديو درس وتمرين"') + '>' +
             (isEx ? svgIcon('pencil') + ' تمرين' : svgIcon('film') + ' فيديو درس') +
           '</button>' +
           '<input class="inp ai-item-inp" data-act="edit-item-title" data-u="' + uIdx + '" data-l="' + lIdx + '" data-i="' + iIdx + '" value="' + escapeHtml(it.title) + '">' +
@@ -471,7 +508,7 @@ function renderPlaylistPlanPreview(area) {
         '<div class="ai-lesson-head">' +
           '<input type="checkbox" data-act="toggle-lesson" data-u="' + uIdx + '" data-l="' + lIdx + '"' + (l._enabled !== false ? ' checked' : '') + '>' +
           '<span class="ai-num">' + (lIdx + 1) + '</span>' +
-          '<button type="button" class="ai-role-chip ' + (isUnitEx ? 'ex' : 'vid') + '" data-act="flip-lesson-type" data-u="' + uIdx + '" data-l="' + lIdx + '" title="اضغط للتبديل بين قسم الدروس وقسم تمارين الوحدة">' +
+          '<button type="button" class="ai-role-chip ' + (isUnitEx ? 'ex' : 'vid') + '" data-act="flip-lesson-type" data-u="' + uIdx + '" data-l="' + lIdx + '"' + (singleUnit ? ' disabled title="كل الفيديوهات تبقى مع الدروس في وضع الوحدة الواحدة"' : ' title="اضغط للتبديل بين قسم الدروس وقسم تمارين الوحدة"') + '>' +
             (isUnitEx ? svgIcon('pencil') + ' تمرين وحدة' : svgIcon('book-open') + ' درس') +
           '</button>' +
           '<input class="inp" data-act="edit-lesson-title" data-u="' + uIdx + '" data-l="' + lIdx + '" value="' + escapeHtml(l.title) + '" placeholder="' + (isUnitEx ? 'عنوان التمرين' : 'عنوان الدرس') + '">' +
@@ -526,7 +563,9 @@ function renderPlaylistPlanPreview(area) {
         '</label>' +
       '</div>' +
 
-      '<p class="hint" style="margin:10px 0">💡 يمكنك تعديل أي عنوان وحدة أو درس مباشرة، أو الضغط على شارة <b>«فيديو درس / تمرين»</b> لتحويل أي فيديو إلى تمرين أو العكس قبل الحفظ.</p>' +
+      '<p class="hint" style="margin:10px 0">' + (singleUnit
+        ? 'كل الفيديوهات، بما فيها التمارين، داخل وحدة واحدة وفي قسم الدروس. يمكنك تعديل العناوين واستبعاد أي فيديو قبل الحفظ، لكن لن تُفصل التمارين.'
+        : '💡 يمكنك تعديل أي عنوان وحدة أو درس مباشرة، أو الضغط على شارة <b>«فيديو درس / تمرين»</b> لتحويل أي فيديو إلى تمرين أو العكس قبل الحفظ.') + '</p>' +
 
       '<div id="aiPlanTree">' + unitsHTML + '</div>' +
 
@@ -791,7 +830,8 @@ function renderClaudeMcpSetupView(box) {
   var samplePrompts = [
     'اعرض لي جميع المواد والوحدات والدروس الموجودة حالياً في موقع آية باك 2027 مع الإحصائيات.',
     'خذ رابط قائمة تشغيل يوتيوب هذه، استخرج فيديوهاتها وقسّمها بذكاء حسب المادة والوحدة والدرس (مع وضع التمارين في قسم التمارين) وأضفها للموقع:\nhttps://www.youtube.com/playlist?list=PUT_PLAYLIST_HERE',
-    'أنشئ وحدة جديدة في مادة المحاسبة بعنوان «أعمال نهاية السنة» وأضف بداخلها درس «التثبيتات العينية والمعنوية».'
+    'أنشئ وحدة جديدة في مادة المحاسبة بعنوان «أعمال نهاية السنة» وأضف بداخلها درس «التثبيتات العينية والمعنوية».',
+    'أضف قائمة التشغيل هذه باستخدام quick_import_youtube_playlist مع grouping_mode="single_unit": كل الفيديوهات بالترتيب كدروس في وحدة واحدة، مع إبقاء التمارين وحلول البكالوريا ضمن الدروس وعدم فصلها:\nhttps://www.youtube.com/playlist?list=PUT_PLAYLIST_HERE'
   ];
 
   box.innerHTML =

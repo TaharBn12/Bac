@@ -954,7 +954,7 @@ function buildSmartCurriculumPlan(
   opts: {
     subjectNameOrId?: string;
     unitTitleOrId?: string;
-    groupingMode?: "smart" | "per_video" | "single_lesson" | "unit_exercises";
+    groupingMode?: "smart" | "per_video" | "single_unit" | "single_lesson" | "unit_exercises";
     separateExercises?: boolean;
   } = {},
 ): CurriculumPlan {
@@ -1010,6 +1010,30 @@ function buildSmartCurriculumPlan(
     if (uById) fixedUnit = { id: uById.id, title: uById.title };
     else if (uByTitle) fixedUnit = { id: uByTitle.id, title: uByTitle.title };
     else fixedUnit = { title: rawU };
+  }
+
+  // خيار الوحدة الواحدة: نحافظ على ترتيب القائمة ونعامل التمارين كدروس عادية.
+  // لا نستخدم تلميحات الوحدات أو فصل التمارين، حتى لو كان مفتاح Claude مفعلاً.
+  if (grouping === "single_unit") {
+    const matchedDefaultUnit = existingUnits.find(
+      (u) => normArNoAl(u.title) === normArNoAl(defaultUnitTitle),
+    );
+    const targetUnit = fixedUnit || (matchedDefaultUnit
+      ? { id: matchedDefaultUnit.id, title: matchedDefaultUnit.title }
+      : { title: defaultUnitTitle });
+    return {
+      subject: subjectEntry,
+      units: playlist.videos.length ? [{
+        ...targetUnit,
+        lessons: playlist.videos.map((v) => ({
+          title: v.cleaned_title || v.title,
+          item_type: "lesson" as const,
+          videos: [{ title: v.cleaned_title || v.title, url: v.url }],
+          exercises: [],
+        })),
+      }] : [],
+      skip_duplicate_urls: true,
+    };
   }
 
   if (grouping === "single_lesson") {
@@ -1420,7 +1444,7 @@ const MCP_TOOLS = [
   {
     name: "quick_import_youtube_playlist",
     description:
-      "استيراد سريع بخطوة واحدة لقائمة تشغيل يوتيوب وتقسيمها تلقائياً إلى مادة ووحدات ودروس أو تمارين.",
+      "استيراد سريع بخطوة واحدة لقائمة تشغيل يوتيوب. الوضع single_unit يضع كل الفيديوهات بالترتيب كدروس في وحدة واحدة، بما فيها التمارين وحلول البكالوريا، دون فصلها (يتجاهل separate_exercises في هذا الوضع). الأوضاع الأخرى تدعم التقسيم الذكي أو درساً لكل فيديو أو تمارين الوحدة أو درساً واحداً.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1429,9 +1453,10 @@ const MCP_TOOLS = [
         unit_title_or_id: { type: "string" },
         grouping_mode: {
           type: "string",
-          enum: ["smart", "per_video", "unit_exercises", "single_lesson"],
+          enum: ["smart", "per_video", "single_unit", "unit_exercises", "single_lesson"],
+          description: "single_unit: وحدة واحدة، وكل فيديو درس مستقل بالترتيب، دون فصل التمارين عن الدروس.",
         },
-        separate_exercises: { type: "boolean" },
+        separate_exercises: { type: "boolean", description: "فصل التمارين في الأوضاع الأخرى؛ يتم تجاهله عندما يكون grouping_mode = single_unit." },
       },
       required: ["playlist_url"],
     },
@@ -2447,7 +2472,8 @@ Deno.serve(async (req: Request): Promise<Response> => {
       ]);
 
       const claudeKey = String(b.anthropicKey || Deno.env.get("ANTHROPIC_API_KEY") || "").trim();
-      if (claudeKey) {
+      // الوحدة الواحدة خيار حتمي: لا نسمح لنموذج اللغة بإعادة فصل التمارين أو الوحدات.
+      if (claudeKey && b.groupingMode !== "single_unit") {
         const aiPlan = await organizeWithClaudeApi(claudeKey, playlist, siteData, {
           subjectNameOrId: b.subjectId,
           unitTitleOrId: b.unitId,
@@ -2489,7 +2515,7 @@ Deno.serve(async (req: Request): Promise<Response> => {
       return jsonResponse({
         ok: true,
         service: "aya-bac-2027-mcp",
-        version: "1.3.0",
+        version: "1.4.0",
         authenticated_key_present: Boolean(adminKey),
         tools_count: MCP_TOOLS.length,
         message: "خادم الذكاء الاصطناعي و Claude MCP لمنصة آية باك 2027 جاهز للاتصال.",
