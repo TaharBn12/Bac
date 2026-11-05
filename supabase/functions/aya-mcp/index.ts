@@ -620,6 +620,41 @@ const YT_SKIP_TITLES = new Set([
   "فيديو محذوف",
 ]);
 
+/** Renderer text node -> plain string (runs / simpleText / content). */
+function readTextNode(node: unknown): string {
+  if (!node) return "";
+  if (typeof node === "string") return node;
+  if (typeof node !== "object") return "";
+  const n = node as Record<string, any>;
+  if (typeof n.content === "string") return n.content;
+  if (typeof n.simpleText === "string") return n.simpleText;
+  if (Array.isArray(n.runs)) return n.runs.map((r: any) => (typeof r?.text === "string" ? r.text : "")).join("");
+  return "";
+}
+
+/** Depth-first search collecting every object stored under `key`. */
+function collectRenderers(root: unknown, key: string, out: any[] = [], guard = 0): any[] {
+  if (!root || typeof root !== "object" || guard > 6000 || out.length >= 500) return out;
+  if (!Array.isArray(root)) {
+    const node = root as Record<string, any>;
+    if (node[key] && typeof node[key] === "object") out.push(node[key]);
+    for (const val of Object.values(node)) {
+      if (val && typeof val === "object") collectRenderers(val, key, out, guard + 1);
+      if (out.length >= 500) break;
+    }
+    return out;
+  }
+  for (const item of root as unknown[]) {
+    if (item && typeof item === "object") collectRenderers(item, key, out, guard + 1);
+    if (out.length >= 500) break;
+  }
+  return out;
+}
+
+/**
+ * YouTube serves playlist entries as `lockupViewModel` (new schema) or as the legacy
+ * `playlistVideoRenderer`. Both shapes are read here so one parser handles every page.
+ */
 function extractFromInnerTubeTree(
   root: unknown,
   seen: Set<string>,
@@ -628,87 +663,94 @@ function extractFromInnerTubeTree(
   meta: { title?: string; author?: string },
 ): void {
   if (!root || typeof root !== "object") return;
-  if (Array.isArray(root)) {
-    for (const item of root) extractFromInnerTubeTree(item, seen, outVideos, continuations, meta);
-    return;
+
+  if (!meta.title) {
+    const pm = collectRenderers(root, "playlistMetadataRenderer")[0];
+    const pmTitle = readTextNode(pm?.title).trim();
+    if (pmTitle) meta.title = pmTitle;
+  }
+  if (!meta.title) {
+    const ph = collectRenderers(root, "pageHeaderRenderer")[0];
+    const phTitle = readTextNode(ph?.pageTitle).trim() || readTextNode(ph?.content?.pageHeaderViewModel?.title).trim();
+    if (phTitle) meta.title = phTitle;
+  }
+  const legacyHeader = collectRenderers(root, "playlistHeaderRenderer")[0];
+  if (legacyHeader) {
+    const ht = readTextNode(legacyHeader.title).trim();
+    if (ht && !meta.title) meta.title = ht;
+    const ow = readTextNode(legacyHeader.ownerText).trim();
+    if (ow && !meta.author) meta.author = ow;
   }
 
-  const obj = root as Record<string, unknown>;
+  const pushVideo = (videoId: string, title: string, duration: string, author: string) => {
+    const cleanTitle = String(title || "").trim();
+    const normT = cleanTitle.toLowerCase();
+    if (!videoId || !cleanTitle) return;
+    if (YT_SKIP_TITLES.has(normT) || seen.has(videoId)) return;
+    seen.add(videoId);
+    outVideos.push({
+      videoId,
+      title: cleanTitle,
+      duration: String(duration || "").trim(),
+      author: String(author || "").trim(),
+    });
+  };
 
-  if (!meta.title && obj.playlistMetadataRenderer && typeof obj.playlistMetadataRenderer === "object") {
-    const pm = obj.playlistMetadataRenderer as Record<string, unknown>;
-    if (typeof pm.title === "string" && pm.title.trim()) meta.title = pm.title.trim();
-  }
-  if (!meta.title && obj.playlistHeaderRenderer && typeof obj.playlistHeaderRenderer === "object") {
-    const ph = obj.playlistHeaderRenderer as Record<string, any>;
-    const t = ph.title?.simpleText || ph.title?.runs?.map((r: any) => r.text).join("");
-    if (t) meta.title = String(t).trim();
-    const ow = ph.ownerText?.runs?.map((r: any) => r.text).join("");
-    if (ow && !meta.author) meta.author = String(ow).trim();
-  }
-  if (!meta.title && obj.pageHeaderRenderer && typeof obj.pageHeaderRenderer === "object") {
-    const phr = obj.pageHeaderRenderer as Record<string, any>;
-    if (typeof phr.pageTitle === "string" && phr.pageTitle.trim()) {
-      meta.title = phr.pageTitle.trim();
+  for (const lv of collectRenderers(root, "lockupViewModel")) {
+    const videoId = typeof lv?.contentId === "string" ? lv.contentId.trim() : "";
+    if (!/^[A-Za-z0-9_-]{11}$/.test(videoId)) continue;
+    if (lv?.contentType && lv.contentType !== "LOCKUP_CONTENT_TYPE_VIDEO") continue;
+    const md = lv?.metadata?.lockupMetadataViewModel || {};
+    const title = readTextNode(md?.title);
+    let duration = "";
+    const overlays = md?.contentImage?.thumbnailViewModel?.overlays || lv?.contentImage?.thumbnailViewModel?.overlays || [];
+    for (const ov of overlays) {
+      for (const badge of ov?.thumbnailBottomOverlayViewModel?.badges || []) {
+        const badgeText = String(badge?.thumbnailBadgeViewModel?.text || "");
+        if (/\d+:\d\d/.test(badgeText)) duration = badgeText;
+      }
     }
+    const rows = md?.metadata?.contentMetadataViewModel?.metadataRows || [];
+    const firstParts = rows[0]?.metadataParts || [];
+    const author = readTextNode(firstParts[0]?.text);
+    pushVideo(videoId, title, duration, author);
   }
 
-  if (obj.playlistVideoRenderer && typeof obj.playlistVideoRenderer === "object") {
-    const pv = obj.playlistVideoRenderer as Record<string, any>;
-    const vid = typeof pv.videoId === "string" ? pv.videoId : "";
-    const title =
-      pv.title?.runs?.map((r: any) => r.text).join("") ||
-      pv.title?.simpleText ||
-      "";
-    const duration =
-      pv.lengthText?.simpleText ||
-      pv.lengthText?.runs?.map((r: any) => r.text).join("") ||
-      "";
-    const author =
-      pv.shortBylineText?.runs?.map((r: any) => r.text).join("") || "";
-
-    const normT = String(title).trim().toLowerCase();
-    if (vid && title && !YT_SKIP_TITLES.has(normT) && pv.isPlayable !== false && !seen.has(vid)) {
-      seen.add(vid);
-      if (author && !meta.author) meta.author = author;
-      outVideos.push({
-        videoId: vid,
-        title: String(title).trim(),
-        duration: String(duration).trim(),
-        author: String(author).trim(),
-      });
-    }
-    return;
+  for (const pv of collectRenderers(root, "playlistVideoRenderer")) {
+    const videoId = typeof pv?.videoId === "string" ? pv.videoId : "";
+    if (pv?.isPlayable === false) continue;
+    const title = readTextNode(pv?.title);
+    const duration = readTextNode(pv?.lengthText);
+    const author = readTextNode(pv?.shortBylineText);
+    if (author && !meta.author) meta.author = author;
+    pushVideo(videoId, title, duration, author);
   }
 
-  if (obj.lockupViewModel && typeof obj.lockupViewModel === "object") {
-    const lv = obj.lockupViewModel as Record<string, any>;
-    const vid = typeof lv.contentId === "string" && lv.contentId.length === 11 ? lv.contentId : "";
-    const title = lv.metadata?.lockupMetadataViewModel?.title?.content || "";
-    const normT = String(title).trim().toLowerCase();
-    if (vid && title && !YT_SKIP_TITLES.has(normT) && !seen.has(vid)) {
-      seen.add(vid);
-      outVideos.push({
-        videoId: vid,
-        title: String(title).trim(),
-        duration: "",
-        author: meta.author || "",
-      });
-    }
-  }
-
-  if (obj.continuationItemRenderer && typeof obj.continuationItemRenderer === "object") {
-    const ci = obj.continuationItemRenderer as Record<string, any>;
+  for (const ci of collectRenderers(root, "continuationItemRenderer")) {
     const token =
-      ci.continuationEndpoint?.continuationCommand?.token ||
-      ci.continuationEndpoint?.commandExecutorCommand?.commands?.find(
+      ci?.continuationEndpoint?.continuationCommand?.token ||
+      ci?.continuationEndpoint?.commandExecutorCommand?.commands?.find(
         (c: any) => c?.continuationCommand?.token,
       )?.continuationCommand?.token;
     if (typeof token === "string" && token) continuations.push(token);
   }
 
-  for (const val of Object.values(obj)) {
-    extractFromInnerTubeTree(val, seen, outVideos, continuations, meta);
+  for (const cv of collectRenderers(root, "continuationItemViewModel")) {
+    const rawToken =
+      cv?.continuationCommand?.innertubeCommand?.continuationCommand?.token ||
+      cv?.continuationCommand?.continuationCommand?.token;
+    if (typeof rawToken === "string" && rawToken) {
+      /* Newer payloads percent-encode the token; the API expects the decoded form. */
+      let token = rawToken;
+      if (token.includes("%")) {
+        try {
+          token = decodeURIComponent(token);
+        } catch {
+          token = rawToken;
+        }
+      }
+      continuations.push(token);
+    }
   }
 }
 
