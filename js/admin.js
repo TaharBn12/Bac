@@ -19,8 +19,8 @@ var KIND_META = {
   exercise: { icon: 'pencil', label: 'تمرين' }
 };
 
-var data, currentTab = 'subjects';
-var sel = { subject: '', unit: '', lesson: '', exercise: '' };
+var data, currentTab = 'overview';
+var sel = { subject: '', unit: '', lesson: '', exercise: '', section: '' };
 var pickedFiles = {}; /* ملفات مختارة مؤقتاً في نماذج الإضافة: pickedFiles[key] = File */
 var adminOpenSections = {}; /* حفظ الأقسام المفتوحة لكل درس/تمرين (الأول مفتوح افتراضياً والبقية مطوية بسهم) */
 var adminOpenGroups = {};   /* حفظ المجموعات المفتوحة (المجموعة الأولى مفتوحة افتراضياً والبقية مطوية بسهم) */
@@ -77,6 +77,11 @@ function showApp() {
       toast('تمت تهيئة المحتوى الأولي في السحابة');
     }
 
+    /* نضمن وجود قسم «بكالوريات» الافتراضي في كل مادة (يظهر تبويباً في صفحة المادة) */
+    var sectionsBefore = (data.sections || []).length;
+    ensureBakSections(data);
+    if ((data.sections || []).length !== sectionsBefore) save();
+
     updateCloudBadge();
 
     /* رابط مباشر لتبويب معين مثل admin.html?tab=ai أو درس/تمرين admin.html?lesson=xxx */
@@ -110,7 +115,7 @@ function showApp() {
         currentTab = requestedTab;
       }
     }
-    $all('.tab').forEach(function (x) { x.classList.toggle('active', x.dataset.tab === currentTab); });
+    syncAdminNav();
 
     var topSchedBtn = $('#topAdminSchedBtn');
     if (topSchedBtn) {
@@ -119,17 +124,72 @@ function showApp() {
       });
     }
 
-    $('#tabsNav').addEventListener('click', function (e) {
-      var t = e.target.closest('.tab');
-      if (!t) return;
-      currentTab = t.dataset.tab;
-      $all('.tab').forEach(function (x) { x.classList.remove('active'); });
-      t.classList.add('active');
-      renderPanel();
-    });
-
+    initAdminDrawer();
     renderPanel();
   });
+}
+
+/* ============ الدراور الجانبي (شريط تنقّل احترافي للوحة التحكم) ============ */
+var ADMIN_PAGE_TITLES = {
+  overview: 'نظرة عامة', subjects: 'المواد', organizer: 'منظّم المحتوى', units: 'الوحدات',
+  lessons: 'الدروس', exercises: 'التمارين', content: 'محتوى الدرس والتمارين',
+  sections: 'الأقسام والبكالوريات', schedule: 'استعمال الزمن', ai: 'الذكاء الاصطناعي', backup: 'نسخ احتياطي'
+};
+
+function syncAdminNav() {
+  $all('[data-tab]').forEach(function (x) { x.classList.toggle('active', x.dataset.tab === currentTab); });
+  var titleEl = $('#adminPageTitle');
+  if (titleEl) titleEl.textContent = ADMIN_PAGE_TITLES[currentTab] || 'لوحة التحكم';
+}
+
+function isMobileDrawer() { return window.matchMedia('(max-width: 980px)').matches; }
+
+function openDrawer(on) {
+  var drawer = $('#adminDrawer');
+  var backdrop = $('#drawerBackdrop');
+  if (!drawer) return;
+  drawer.classList.toggle('open', !!on);
+  if (backdrop) backdrop.hidden = !on;
+  document.body.classList.toggle('drawer-open', !!on);
+}
+
+function initAdminDrawer() {
+  var shell = $('#adminShell');
+  var drawerToggle = $('#drawerToggle');
+  var closeBtn = $('#drawerClose');
+  var collapseBtn = $('#drawerCollapse');
+  var backdrop = $('#drawerBackdrop');
+
+  /* استرجاع حالة التصغير المحفوظة على الكمبيوتر */
+  try {
+    if (localStorage.getItem('ayaAdminDrawerCollapsed') === '1') shell.classList.add('is-collapsed');
+  } catch (e) { /* تجاهل */ }
+
+  if (drawerToggle) drawerToggle.addEventListener('click', function () { openDrawer(true); });
+  if (closeBtn) closeBtn.addEventListener('click', function () { openDrawer(false); });
+  if (backdrop) backdrop.addEventListener('click', function () { openDrawer(false); });
+
+  if (collapseBtn) collapseBtn.addEventListener('click', function () {
+    var collapsed = shell.classList.toggle('is-collapsed');
+    try { localStorage.setItem('ayaAdminDrawerCollapsed', collapsed ? '1' : '0'); } catch (e) { /* تجاهل */ }
+  });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') openDrawer(false);
+  });
+
+  /* التنقّل بين الأقسام من الدراور */
+  var drawer = $('#adminDrawer');
+  if (drawer) {
+    drawer.addEventListener('click', function (e) {
+      var link = e.target.closest('[data-tab]');
+      if (!link) return;
+      currentTab = link.dataset.tab;
+      syncAdminNav();
+      renderPanel();
+      if (isMobileDrawer()) openDrawer(false);
+    });
+  }
 }
 
 /* شارة حالة السحابة أعلى اللوحة */
@@ -150,7 +210,15 @@ function updateCloudBadge() {
 
 /* تنبيه يظهر أعلى اللوحات عندما لا تكون السحابة متصلة */
 function cloudBannerHTML() {
-  if (isCloudMode()) return '';
+  if (isCloudMode()) {
+    /* قاعدة البيانات منشأة لكنها قديمة: ننبّه لتحديثها حتى تُحفظ الأقسام الديناميكية */
+    if (Cloud.sectionsMissing || Cloud.sectionColumnsMissing) {
+      return '<div class="cloud-banner warn-banner">' + svgIcon('alert') + ' <b>قاعدة البيانات تحتاج تحديثاً بسيطاً.</b><br>' +
+        'المحتوى العادي يعمل، لكن لحفظ <b>الأقسام والبكالوريات</b> نفّذ ملف <code>supabase-setup.sql</code> المحدَّث مرة واحدة في <b>SQL Editor</b> ' +
+        '(يضيف جدول الأقسام وعمود section_id بأمان دون حذف أي بيانات).</div>';
+    }
+    return '';
+  }
   if (typeof Cloud !== 'undefined' && Cloud.setupMissing) {
     return '<div class="cloud-banner">' + svgIcon('alert') + ' <b>لم تُنشأ جداول Supabase بعد.</b><br>' +
       'خطوات الربط (مرة واحدة فقط):<br>' +
@@ -212,6 +280,14 @@ function deleteCascade(where, id) {
     data.lessons = data.lessons.filter(function (l) { return lessonIds.indexOf(l.id) === -1; });
     data.units = data.units.filter(function (u) { return u.subjectId !== id; });
     data.subjects = data.subjects.filter(function (s) { return s.id !== id; });
+    /* حذف الأقسام والصفحات الديناميكية التابعة للمادة (بكالوريات، سنوات...) مع مواردها */
+    var secIds = ensureSectionsArray(data).filter(function (x) { return x.subjectId === id; }).map(function (x) { return x.id; });
+    if (secIds.length) {
+      var secRes = data.resources.filter(function (r) { return secIds.indexOf(r.sectionId) !== -1; });
+      data.resources = data.resources.filter(function (r) { return secIds.indexOf(r.sectionId) === -1; });
+      data.sections = data.sections.filter(function (x) { return secIds.indexOf(x.id) === -1; });
+      removedResources = removedResources.concat(secRes);
+    }
   } else if (where === 'unit') {
     var lessonIds2 = data.lessons.filter(function (l) { return l.unitId === id; }).map(function (l) { return l.id; });
     removedResources = data.resources.filter(function (r) { return lessonIds2.indexOf(r.lessonId) !== -1; });
@@ -298,6 +374,8 @@ function bindList(container, handlers) {
     else if (act === 'view' && handlers.view) handlers.view(id);
     else if (act === 'goto' && handlers.goto) handlers.goto(id);
     else if (act === 'select' && handlers.select) handlers.select(id);
+    else if (act === 'add-child' && handlers.addChild) handlers.addChild(id);
+    else if (act === 'manage-content' && handlers.manageContent) handlers.manageContent(id);
   });
 }
 
@@ -904,6 +982,10 @@ function duplicateSubject(id) {
   var maxOrder = data.subjects.reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0);
   data.subjects.push({ id: nid, name: s.name + ' (نسخة)', icon: s.icon || 'book', color: s.color || 'indigo', order: maxOrder + 1 });
   unitsOf(data, id).forEach(function (u) { duplicateUnit(u.id, nid, true); });
+  /* نسخ الأقسام والصفحات الديناميكية (بكالوريات وسنواتها) مع محتواها */
+  ensureSectionsArray(data);
+  var idMap = {};
+  rootSectionsOf(data, id).forEach(function (sec) { idMap[sec.id] = duplicateSectionTree(sec, nid, ''); });
   save();
   return nid;
 }
@@ -915,7 +997,8 @@ function renderPanel() {
     clearInterval(window._ayaActiveSchedTimer);
     window._ayaActiveSchedTimer = null;
   }
-  if (currentTab === 'subjects') renderSubjectsPanel(p);
+  if (currentTab === 'overview') renderOverviewPanel(p);
+  else if (currentTab === 'subjects') renderSubjectsPanel(p);
   else if (currentTab === 'schedule' && typeof renderAdminSchedulePanel === 'function') renderAdminSchedulePanel(p, data);
   else if (currentTab === 'ai' && typeof renderAiPanel === 'function') renderAiPanel(p);
   else if (currentTab === 'organizer') renderOrganizerPanel(p);
@@ -923,17 +1006,87 @@ function renderPanel() {
   else if (currentTab === 'lessons') renderLessonsPanel(p);
   else if (currentTab === 'exercises') renderExercisesPanel(p);
   else if (currentTab === 'content') renderContentPanel(p);
+  else if (currentTab === 'sections') renderSectionsPanel(p);
   else if (currentTab === 'backup') renderBackupPanel(p);
   var banner = cloudBannerHTML();
   if (banner) p.insertAdjacentHTML('afterbegin', banner);
+  if (window.innerWidth > 980) {
+    var main = $('.admin-main');
+    if (main && main.scrollTop) main.scrollTop = 0;
+  }
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
-/* ---------- منظّم المحتوى: رؤية كاملة للمادة ← الوحدة ← الدرس / التمرين ---------- */
+/* ---------- التنقّل بين الأقسام من أي مكان في اللوحة ---------- */
 function goToAdminTab(tab) {
   currentTab = tab;
-  $all('.tab').forEach(function (x) { x.classList.toggle('active', x.dataset.tab === tab); });
+  syncAdminNav();
   renderPanel();
+}
+
+/* ============================================================
+   لوحة «نظرة عامة» — ملخص المحتوى واختصارات سريعة
+   ============================================================ */
+function renderOverviewPanel(p) {
+  ensureSectionsArray(data);
+  var lessonsCount = data.lessons.filter(function (l) { return !isExerciseItem(l); }).length;
+  var exCount = data.lessons.filter(function (l) { return isExerciseItem(l); }).length;
+  var videoCount = data.resources.filter(function (r) { return r.kind === 'video'; }).length;
+  var pdfCount = data.resources.filter(function (r) { return r.kind === 'pdf'; }).length;
+  var imgCount = data.resources.filter(function (r) { return r.kind === 'image'; }).length;
+  var sectionsCount = (data.sections || []).filter(function (s) { return !(s.parentId || ''); }).length;
+
+  var cards = [
+    { icon: 'book', label: 'المواد', value: data.subjects.length, tab: 'subjects' },
+    { icon: 'layers', label: 'الوحدات', value: data.units.length, tab: 'units' },
+    { icon: 'film', label: 'الدروس', value: lessonsCount, tab: 'lessons' },
+    { icon: 'pencil', label: 'التمارين', value: exCount, tab: 'exercises' },
+    { icon: 'cap', label: 'الأقسام والبكالوريات', value: sectionsCount, tab: 'sections' },
+    { icon: 'plus', label: 'عناصر المحتوى', value: data.resources.length, tab: 'content' }
+  ];
+
+  p.innerHTML =
+    '<h2>' + svgIcon('chart') + ' نظرة عامة</h2>' +
+    '<p class="hint">ملخص سريع لكل ما تحتويه المنصة، مع اختصارات للوصول المباشر إلى أي قسم للإدارة.</p>' +
+
+    '<div class="ov-grid">' + cards.map(function (c) {
+      return '<button type="button" class="ov-card" data-goto="' + c.tab + '">' +
+        '<span class="ov-ico">' + svgIcon(c.icon) + '</span>' +
+        '<span class="ov-val">' + c.value + '</span>' +
+        '<span class="ov-lbl">' + c.label + '</span>' +
+      '</button>';
+    }).join('') + '</div>' +
+
+    '<div class="ov-stats-bar">' +
+      '<span class="sstat">' + svgIcon('film') + ' <b>' + videoCount + '</b> فيديو</span>' +
+      '<span class="sstat">' + svgIcon('file') + ' <b>' + pdfCount + '</b> ملف PDF</span>' +
+      '<span class="sstat">' + svgIcon('image') + ' <b>' + imgCount + '</b> صورة</span>' +
+    '</div>' +
+
+    '<h3 class="sub-title">' + svgIcon('cap') + ' تبويبات «بكالوريات» حسب المادة</h3>' +
+    '<div class="admin-list">' + data.subjects.slice().sort(byOrder).map(function (s) {
+      var bak = getSection(data, bakSectionId(s.id));
+      var kids = bak ? sectionChildrenOf(data, bak.id) : [];
+      return '<div class="item-row">' +
+        '<span class="item-ico">' + iconHTML(s.icon, 'book') + '</span>' +
+        '<span class="item-main"><span class="item-title">' + escapeHtml(s.name) + '</span>' +
+          '<span class="item-sub">' + (bak ? escapeHtml(bak.title) + ' — ' + kids.length + ' سنوات/أقسام فرعية' : 'لا يوجد قسم بكالوريات') + '</span>' +
+        '</span>' +
+        '<span class="item-acts">' +
+          '<button class="icon-btn" data-act="goto" data-id="' + s.id + '" title="إدارة أقسام المادة">' + svgIcon('chevron-left') + '</button>' +
+        '</span>' +
+      '</div>';
+    }).join('') + '</div>';
+
+  $all('[data-goto]', p).forEach(function (b) {
+    b.addEventListener('click', function () { goToAdminTab(b.dataset.goto); });
+  });
+  bindList(p, {
+    goto: function (subjectId) {
+      sel.subject = subjectId;
+      goToAdminTab('sections');
+    }
+  });
 }
 
 function openQuickUnitDialog(subjectId) {
@@ -1218,6 +1371,7 @@ function renderSubjectsPanel(p) {
         var lCount = units.reduce(function (n, u) { return n + lessonsOf(data, u.id).length; }, 0);
         var exCount = units.reduce(function (n, u) { return n + unitExercisesOf(data, u.id).length; }, 0);
         var coeff = getSubjectCoefficient(s);
+        var secCount = rootSectionsOf(data, s.id).length;
         return '<div class="item-row c-' + (s.color || 'indigo') + (s.hidden ? ' is-hidden-row' : '') + '">' +
           '<div class="item-ico">' + iconHTML(s.icon, 'book') + '</div>' +
           '<div class="item-info">' +
@@ -1225,7 +1379,7 @@ function renderSubjectsPanel(p) {
               ' <span class="coeff-pill">المعامل ' + coeff + '</span>' +
               hiddenPillHTML(s.hidden) +
             '</div>' +
-            '<div class="item-sub">' + units.length + ' وحدة · ' + lCount + ' درس · ' + exCount + ' تمرين</div>' +
+            '<div class="item-sub">' + units.length + ' وحدة · ' + lCount + ' درس · ' + exCount + ' تمرين · ' + secCount + ' أقسام</div>' +
           '</div>' +
           actsHTML(s.id,
             '<div class="coeff-stepper" title="تعديل سريع لمعامل المادة">' +
@@ -1233,6 +1387,7 @@ function renderSubjectsPanel(p) {
               '<span class="coeff-stepper-val">' + coeff + '</span>' +
               '<button type="button" class="mini-ic-btn" data-act="coeff-inc" data-id="' + s.id + '" title="زيادة المعامل">+</button>' +
             '</div>' +
+            '<button class="icon-btn" data-act="goto" data-id="' + s.id + '" title="أقسام المادة (بكالوريات، صفحات...)">' + svgIcon('cap') + '</button>' +
             hideBtnHTML(s.id, s.hidden, 'إخفاء المادة عن الطلاب', 'إظهار المادة للطلاب') +
             '<button class="icon-btn" data-act="copy" data-id="' + s.id + '" title="نسخ المادة بكل محتواها">' + svgIcon('copy') + '</button>'
           ) +
@@ -1273,6 +1428,7 @@ function renderSubjectsPanel(p) {
   });
 
   bindList($('#subjList'), {
+    goto: function (id) { sel.subject = id; sel.section = ''; goToAdminTab('sections'); },
     up: function (id) { moveItem(data.subjects, id, -1); renderPanel(); },
     down: function (id) { moveItem(data.subjects, id, 1); renderPanel(); },
     coeffInc: function (id) {
@@ -1990,6 +2146,286 @@ function renderContentPanel(p) {
 }
 
 /* ============================================================
+   لوحة «الأقسام والبكالوريات» — صفحات ديناميكية داخل كل مادة
+   (تبويب رئيسي مثل «بكالوريات» ← سنوات ← مواضيع/حلول، أو أي صفحة)
+   ============================================================ */
+var adminOpenSectionNodes = {};
+
+function sectionKindOptions(allowed, selected) {
+  var list = allowed || Object.keys(SECTION_KINDS);
+  return list.map(function (k) {
+    return { value: k, label: (SECTION_KINDS[k] ? SECTION_KINDS[k].label : k) };
+  });
+}
+
+function nextSectionOrder(subjectId, parentId) {
+  var siblings = parentId ? sectionChildrenOf(data, parentId) : rootSectionsOf(data, subjectId);
+  return siblings.reduce(function (m, s) { return Math.max(m, s.order || 0); }, 0) + 1;
+}
+
+/* نافذة إضافة/تعديل قسم */
+function openSectionDialog(opts) {
+  var isEdit = !!opts.section;
+  var s = opts.section || { title: '', icon: 'file', kind: opts.kind || 'folder' };
+  var allowed = opts.parentId ? ['folder', 'page'] : ['tab', 'topic', 'exercise', 'folder', 'page'];
+  var kind = allowed.indexOf(s.kind) !== -1 ? s.kind : allowed[0];
+
+  openEditDialog({
+    title: isEdit ? 'تعديل القسم: ' + s.title : 'إضافة قسم / صفحة جديدة',
+    icon: 'layers',
+    fields: [
+      { key: 'title', label: 'العنوان', placeholder: 'مثال: بكالوريات / 2025 / مواضيع مقترحة', value: s.title },
+      { key: 'icon', label: 'الأيقونة (اسم SVG أو رابط صورة)', type: 'icon', value: s.icon || 'file', placeholder: 'مثال: cap أو calendar' },
+      { key: 'kind', label: 'نوع القسم', type: 'select', value: kind, options: sectionKindOptions(allowed) },
+      { key: 'order', label: 'موضعه في الترتيب', type: 'number', value: isEdit ? (s.order || 1) : nextSectionOrder(opts.subjectId, opts.parentId) }
+    ],
+    onSave: function (v) {
+      var title = String(v.title || '').trim();
+      if (!title) { toast('اكتب عنوان القسم', 'err'); return; }
+      if (isEdit) {
+        s.title = title;
+        s.icon = String(v.icon || '').trim() || 'file';
+        s.kind = v.kind || s.kind;
+        var siblings = s.parentId ? sectionChildrenOf(data, s.parentId) : rootSectionsOf(data, s.subjectId);
+        setItemOrder(siblings, s.id, v.order);
+      } else {
+        var id = uid('sec');
+        data.sections.push({
+          id: id, subjectId: opts.subjectId, parentId: opts.parentId || '',
+          title: title, icon: String(v.icon || '').trim() || 'file',
+          kind: v.kind || 'folder', hidden: false, order: 1
+        });
+        var siblings2 = opts.parentId ? sectionChildrenOf(data, opts.parentId) : rootSectionsOf(data, opts.subjectId);
+        setItemOrder(siblings2, id, v.order);
+        adminOpenSectionNodes[id] = true;
+      }
+      save();
+      renderPanel();
+      toast(isEdit ? 'تم تعديل القسم' : 'تمت إضافة القسم');
+    }
+  });
+}
+
+/* حذف قسم مع كل ما تحته (أقسام فرعية + محتوى) */
+function deleteSectionCascade(id) {
+  var removeIds = [];
+  (function collect(pid) {
+    sectionChildrenOf(data, pid).forEach(function (c) { removeIds.push(c.id); collect(c.id); });
+  })(id);
+  removeIds.unshift(id);
+  var removedResources = data.resources.filter(function (r) { return removeIds.indexOf(r.sectionId) !== -1; });
+  data.resources = data.resources.filter(function (r) { return removeIds.indexOf(r.sectionId) === -1; });
+  data.sections = data.sections.filter(function (s) { return removeIds.indexOf(s.id) === -1; });
+  removedResources.map(function (r) { return r.url; }).filter(function (url, i, urls) {
+    return urls.indexOf(url) === i;
+  }).forEach(releaseFileIfUnused);
+  if (sel.section && removeIds.indexOf(sel.section) !== -1) sel.section = '';
+  save();
+}
+
+/* إضافة سنوات البكالوريا تلقائياً تحت القسم المحدد */
+function autoAddBakYears(parentId) {
+  var parent = getSection(data, parentId);
+  if (!parent) return;
+  var existing = sectionChildrenOf(data, parentId).map(function (c) { return String(c.title).trim(); });
+  var currentYear = new Date().getFullYear();
+  var years = [];
+  for (var y = currentYear; y >= currentYear - 5; y--) years.push(String(y));
+  var added = 0;
+  years.forEach(function (y) {
+    if (existing.indexOf(y) !== -1) return;
+    var id = uid('sec');
+    data.sections.push({
+      id: id, subjectId: parent.subjectId, parentId: parentId, title: y,
+      icon: 'calendar', kind: 'folder', hidden: false,
+      order: nextSectionOrder(parent.subjectId, parentId)
+    });
+    adminOpenSectionNodes[id] = true;
+    added++;
+  });
+  if (!added) { toast('السنوات موجودة مسبقاً', 'info'); return; }
+  adminOpenSectionNodes[parentId] = true;
+  save();
+  renderPanel();
+  toast('تمت إضافة ' + added + ' سنوات تحت «' + parent.title + '»');
+}
+
+/* نسخ قسم مع كل أقسامه الفرعية وموارده داخل مادة (أو تحت أبٍ جديد) */
+function duplicateSectionTree(section, targetSubjectId, targetParentId) {
+  var newId = uid('sec');
+  ensureSectionsArray(data).push({
+    id: newId, subjectId: targetSubjectId, parentId: targetParentId || '',
+    title: section.title, icon: section.icon || 'file', kind: section.kind || 'page',
+    hidden: !!section.hidden, order: section.order || 1
+  });
+  var kids = sectionChildrenOf(data, section.id);
+  kids.forEach(function (k) { duplicateSectionTree(k, targetSubjectId, newId); });
+  resourcesOf(data, section.id, null, true).forEach(function (r) {
+    var copy = JSON.parse(JSON.stringify(r));
+    copy.id = uid('r');
+    copy.sectionId = newId;
+    copy.lessonId = '';
+    data.resources.push(copy);
+  });
+  return newId;
+}
+
+/* شجرة الأقسام (قابلة للطي والتوسيع) */
+function sectionNodeHTML(s, depth) {
+  var kids = sectionChildrenOf(data, s.id);
+  var resCount = resourcesOf(data, s.id).length;
+  var isOpen = !!adminOpenSectionNodes[s.id];
+  var kindMeta = SECTION_KINDS[s.kind] || SECTION_KINDS.page;
+  var extra =
+    '<button class="icon-btn" data-act="add-child" data-id="' + s.id + '" title="إضافة قسم فرعي داخله">' + svgIcon('plus') + '</button>' +
+    '<button class="icon-btn" data-act="manage-content" data-id="' + s.id + '" title="إدارة محتوى هذا القسم">' + svgIcon('file') + '</button>' +
+    '<a class="icon-btn" href="section.html?section=' + encodeURIComponent(s.id) + '" target="_blank" title="معاينة الصفحة">' + svgIcon('eye') + '</a>' +
+    hideBtnHTML(s.id, s.hidden);
+
+  return '<div class="sec-node" data-node="' + s.id + '" style="--depth:' + depth + '">' +
+    '<div class="sec-node-row' + (sel.section === s.id ? ' selected' : '') + '">' +
+      (kids.length
+        ? '<button class="icon-btn" data-act="toggle-open" data-id="' + s.id + '" title="إظهار/إخفاء الأقسام الفرعية">' + svgIcon(isOpen ? 'chevron-down' : 'chevron-left') + '</button>'
+        : '<span class="sec-node-spacer"></span>') +
+      '<span class="sec-node-ico">' + iconHTML(s.icon, kindMeta.icon) + '</span>' +
+      '<span class="sec-node-main">' +
+        '<span class="sec-node-title">' + escapeHtml(s.title) + hiddenPillHTML(s.hidden) + '</span>' +
+        '<span class="sec-node-meta">' + svgIcon(kindMeta.icon) + ' ' + kindMeta.label +
+          (kids.length ? ' · ' + kids.length + ' أقسام فرعية' : '') +
+          ' · ' + resCount + ' عنصر محتوى</span>' +
+      '</span>' +
+      actsHTML(s.id, extra) +
+    '</div>' +
+    (kids.length && isOpen
+      ? '<div class="sec-node-children">' + kids.map(function (k) { return sectionNodeHTML(k, depth + 1); }).join('') + '</div>'
+      : (kids.length ? '<div class="sec-node-collapsed-hint">' + kids.length + ' أقسام فرعية مخفية — اضغط السهم لإظهارها</div>' : '')) +
+  '</div>';
+}
+
+function renderSectionsPanel(p) {
+  ensureSectionsArray(data);
+  if (!sel.subject || !getSubject(data, sel.subject)) {
+    sel.subject = (data.subjects.slice().sort(byOrder)[0] || {}).id || '';
+  }
+  var subject = getSubject(data, sel.subject);
+  var roots = subject ? rootSectionsOf(data, subject.id) : [];
+
+  p.innerHTML =
+    '<h2>' + svgIcon('cap') + ' الأقسام والبكالوريات</h2>' +
+    '<p class="hint">أنشئ صفحات ديناميكية داخل كل مادة: تبويب مثل <b>بكالوريات</b> ← سنوات (2026، 2025…) ← مواضيع الامتحان والحلول. ' +
+    'كما يمكنك إضافة <b>مواضيع</b> تظهر في تبويب المواضيع، و<b>تمارين خارج الدروس</b> تظهر في تبويب التمارين، ثم رفع المحتوى (فيديو / PDF / صور / روابط) داخل أي قسم.</p>' +
+
+    '<div class="frm-card">' +
+      '<div class="frm-row">' +
+        '<select class="inp" id="secSubject">' + subjectOptions(sel.subject) + '</select>' +
+        '<button type="button" class="btn btn-primary" id="addRootSection">' + svgIcon('plus') + ' إضافة قسم رئيسي</button>' +
+        '<button type="button" class="btn" id="addBakYears">' + svgIcon('calendar') + ' إضافة السنوات تلقائياً</button>' +
+      '</div>' +
+      '<p class="hint" style="margin:10px 0 0">كل مادة تحتوي افتراضياً على تبويب <b>بكالوريات</b> — أضف تحته السنوات، وداخل كل سنة مواضيع الامتحان أو الحلول.</p>' +
+    '</div>' +
+
+    '<div class="sec-tree" id="secTree">' +
+      (roots.length
+        ? roots.map(function (s) { return sectionNodeHTML(s, 0); }).join('')
+        : '<div class="empty">لا توجد أقسام في هذه المادة بعد — اضغط «إضافة قسم رئيسي» للبدء</div>') +
+    '</div>' +
+
+    '<div id="secContentMount"></div>';
+
+  $('#secSubject').addEventListener('change', function () {
+    sel.subject = this.value;
+    sel.section = '';
+    renderPanel();
+  });
+
+  $('#addRootSection').addEventListener('click', function () {
+    if (!sel.subject) { toast('اختر مادة أولاً', 'err'); return; }
+    openSectionDialog({ subjectId: sel.subject, parentId: '', kind: 'tab' });
+  });
+
+  $('#addBakYears').addEventListener('click', function () {
+    if (!sel.section) {
+      var bak = getSection(data, bakSectionId(sel.subject));
+      if (!bak) { toast('اختر قسم «بكالوريات» أو أنشئه أولاً', 'err'); return; }
+      autoAddBakYears(bak.id);
+      return;
+    }
+    autoAddBakYears(sel.section);
+  });
+
+  bindList($('#secTree'), {
+    up: function (id) {
+      var s = getSection(data, id);
+      if (!s) return;
+      moveItem(s.parentId ? sectionChildrenOf(data, s.parentId) : rootSectionsOf(data, s.subjectId), id, -1);
+      renderPanel();
+    },
+    down: function (id) {
+      var s = getSection(data, id);
+      if (!s) return;
+      moveItem(s.parentId ? sectionChildrenOf(data, s.parentId) : rootSectionsOf(data, s.subjectId), id, +1);
+      renderPanel();
+    },
+    rename: function (id) {
+      var s = getSection(data, id);
+      if (!s) return;
+      openSectionDialog({ section: s, subjectId: s.subjectId, parentId: s.parentId });
+    },
+    del: function (id) {
+      var s = getSection(data, id);
+      if (!s) return;
+      var kids = sectionChildrenOf(data, id).length;
+      if (!confirm('حذف «' + s.title + '»' + (kids ? ' وكل ما تحته (' + kids + ' أقسام فرعية)' : '') + ' نهائياً؟')) return;
+      deleteSectionCascade(id);
+      renderPanel();
+      toast('تم حذف القسم');
+    },
+    toggleHide: function (id) {
+      var s = getSection(data, id);
+      if (!s) return;
+      s.hidden = !s.hidden;
+      save(); renderPanel();
+      toast(s.hidden ? 'تم إخفاء القسم عن الطلاب' : 'تم إظهار القسم للطلاب', s.hidden ? 'info' : 'ok');
+    },
+    toggleOpen: function (id) {
+      adminOpenSectionNodes[id] = !adminOpenSectionNodes[id];
+      renderPanel();
+    },
+    addChild: function (id) {
+      var s = getSection(data, id);
+      if (!s) return;
+      adminOpenSectionNodes[id] = true;
+      openSectionDialog({ subjectId: s.subjectId, parentId: id, kind: 'folder' });
+    },
+    manageContent: function (id) {
+      sel.section = (sel.section === id) ? '' : id;
+      renderPanel();
+    }
+  });
+
+  /* منطقة إدارة محتوى القسم المحدد (نفس منشئ المحتوى المستخدم في الدروس) */
+  var mountEl = $('#secContentMount');
+  if (sel.section && getSection(data, sel.section)) {
+    var sec = getSection(data, sel.section);
+    var secPath = sectionPath(data, sec.id);
+    mountEl.innerHTML =
+      '<div class="frm-card section-content-card">' +
+        '<div class="sec-content-head">' +
+          '<h3>' + svgIcon('file') + ' محتوى: ' + escapeHtml(sec.title) + '</h3>' +
+          '<div class="sec-content-acts">' +
+            '<a class="btn btn-sm" href="section.html?section=' + encodeURIComponent(sec.id) + '" target="_blank">' + svgIcon('eye') + ' معاينة الصفحة</a>' +
+            '<button type="button" class="btn btn-sm" id="closeSecContent">' + svgIcon('x') + ' إغلاق</button>' +
+          '</div>' +
+        '</div>' +
+        (secPath ? '<p class="hint">المسار: ' + secPath.sections.map(function (x) { return escapeHtml(x.title); }).join(' › ') + '</p>' : '') +
+        '<div id="secResArea"></div>' +
+      '</div>';
+    $('#closeSecContent').addEventListener('click', function () { sel.section = ''; renderPanel(); });
+    renderResourceSections($('#secResArea'), { id: sec.id, title: sec.title, unitId: '' }, { exerciseItemMode: false });
+  }
+}
+
+/* ============================================================
    منشئ المجموعات الديناميكي (عنوان + عنصر أو عدة عناصر، يليه عنوان آخر...)
    يعمل لكل من: الفيديو، ملفات PDF، الصور، والتمارين المرفقة بالدرس
    ============================================================ */
@@ -2451,7 +2887,6 @@ function saveComposerBlocks(mount, area, lesson, kind, cfg, opts) {
             var itemTitle = totalInBlock > 1 ? (groupTitle + ' (' + itemCounter + ')') : groupTitle;
             var rec = {
               id: uid('r'),
-              lessonId: lesson.id,
               kind: kind,
               title: itemTitle,
               url: fid,
@@ -2461,6 +2896,7 @@ function saveComposerBlocks(mount, area, lesson, kind, cfg, opts) {
               groupTitle: groupTitle,
               order: maxOrder
             };
+            applyContainer(data, rec, lesson.id);
             data.resources.push(rec);
             newlyCreated.push(rec);
           });
@@ -2474,7 +2910,6 @@ function saveComposerBlocks(mount, area, lesson, kind, cfg, opts) {
           var itemTitle = totalInBlock > 1 ? (groupTitle + ' (' + itemCounter + ')') : groupTitle;
           var rec = {
             id: uid('r'),
-            lessonId: lesson.id,
             kind: kind,
             title: itemTitle,
             url: uStr,
@@ -2483,6 +2918,7 @@ function saveComposerBlocks(mount, area, lesson, kind, cfg, opts) {
             groupTitle: groupTitle,
             order: maxOrder
           };
+          applyContainer(data, rec, lesson.id);
           data.resources.push(rec);
           newlyCreated.push(rec);
         });
@@ -2957,12 +3393,13 @@ function openAppendToGroupDialog(targetGroup, gIdx, area, lesson, kind, cfg, opt
         return filePut(pf.file).then(function (fid) {
           seq++;
           var rec = {
-            id: uid('r'), lessonId: lesson.id, kind: kind,
+            id: uid('r'), kind: kind,
             title: gTitle + ' (' + seq + ')',
             url: fid, size: pf.file.size || undefined,
             exerciseType: exType,
             groupId: gid, groupTitle: gTitle, order: 9999
           };
+          applyContainer(data, rec, lesson.id);
           data.resources.push(rec);
           grp.items.push(rec);
         });
@@ -2973,12 +3410,13 @@ function openAppendToGroupDialog(targetGroup, gIdx, area, lesson, kind, cfg, opt
       rawUrls.forEach(function (uStr) {
         seq++;
         var rec = {
-          id: uid('r'), lessonId: lesson.id, kind: kind,
+          id: uid('r'), kind: kind,
           title: gTitle + ' (' + seq + ')',
           url: uStr,
           exerciseType: exType,
           groupId: gid, groupTitle: gTitle, order: 9999
         };
+        applyContainer(data, rec, lesson.id);
         data.resources.push(rec);
         grp.items.push(rec);
       });
@@ -3194,7 +3632,8 @@ function renderBackupPanel(p) {
         svgIcon('book') + ' ' + data.subjects.length + ' مادة · ' + svgIcon('layers') + ' ' + data.units.length + ' وحدة · ' +
         svgIcon('film') + ' ' + data.lessons.filter(function (l) { return !isExerciseItem(l); }).length + ' درس · ' +
         svgIcon('pencil') + ' ' + data.lessons.filter(function (l) { return isExerciseItem(l); }).length + ' تمرين وحدة · ' +
-        svgIcon('plus') + ' ' + data.resources.length + ' عنصر محتوى' +
+        svgIcon('plus') + ' ' + data.resources.length + ' عنصر محتوى · ' +
+        svgIcon('cap') + ' ' + ensureSectionsArray(data).length + ' قسم وصفحة ديناميكية' +
       '</div>' +
     '</div>';
 
@@ -3209,7 +3648,7 @@ function renderBackupPanel(p) {
     Cloud.loadAll().then(function (d) {
       data = d;
       window.CLOUD_DATA = d;
-      sel = { subject: '', unit: '', lesson: '', exercise: '' };
+      sel = { subject: '', unit: '', lesson: '', exercise: '', section: '' };
       renderPanel();
       toast('تم تحميل أحدث نسخة من السحابة');
     }).catch(function () {
@@ -3241,7 +3680,7 @@ function renderBackupPanel(p) {
         data = d;
         save();
         toast('تم الاستيراد بنجاح');
-        sel = { subject: '', unit: '', lesson: '', exercise: '' };
+        sel = { subject: '', unit: '', lesson: '', exercise: '', section: '' };
         renderPanel();
       } catch (e) {
         toast('الملف غير صالح', 'err');
@@ -3256,7 +3695,7 @@ function renderBackupPanel(p) {
       data = resetData();
       window.CLOUD_DATA = data;
       save(); /* في الوضع السحابي: يُعاد ضبط السحابة أيضاً */
-      sel = { subject: '', unit: '', lesson: '', exercise: '' };
+      sel = { subject: '', unit: '', lesson: '', exercise: '', section: '' };
       renderPanel();
       updateCloudBadge();
       toast('تمت إعادة التعيين', 'info');

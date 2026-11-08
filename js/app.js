@@ -134,7 +134,10 @@ function loadData() {
     var raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       var d = JSON.parse(raw);
-      if (d && Array.isArray(d.subjects)) return d;
+      if (d && Array.isArray(d.subjects)) {
+        if (!Array.isArray(d.sections)) d.sections = [];
+        return d;
+      }
     }
   } catch (e) { /* بيانات تالفة → نعيد التهيئة */ }
   var fresh = JSON.parse(JSON.stringify(window.DEFAULT_DATA));
@@ -227,11 +230,120 @@ function allUnitItemsOf(data, unitId, includeHidden) {
     return l.unitId === unitId && (showAll || !l.hidden);
   }).sort(byOrder);
 }
+/* جلب موارد أي «حاوية محتوى»: درس، تمرين، أو قسم/صفحة ديناميكية */
 function resourcesOf(data, lessonId, kind, includeHidden) {
   var showAll = !!(includeHidden || window.AYA_ADMIN_MODE);
   return data.resources.filter(function (r) {
-    return r.lessonId === lessonId && (!kind || r.kind === kind) && (showAll || !r.hidden);
+    var owner = r.lessonId || r.sectionId;
+    return owner === lessonId && (!kind || r.kind === kind) && (showAll || !r.hidden);
   }).sort(byOrder);
+}
+
+/* ============================================================
+   الأقسام والصفحات الديناميكية داخل المادة
+   (بكالوريات، سنوات البكالوريا، مواضيع إضافية، تمارين خارج الدروس...)
+   ============================================================ */
+var SECTION_KINDS = {
+  tab:      { icon: 'layers',    label: 'تبويب رئيسي في صفحة المادة' },
+  topic:    { icon: 'book-open', label: 'موضوع (يظهر في تبويب المواضيع)' },
+  exercise: { icon: 'pencil',    label: 'تمرين خارج الدروس' },
+  folder:   { icon: 'folder',    label: 'مجلد (سنوات / مجموعات)' },
+  page:     { icon: 'file',      label: 'صفحة محتوى' }
+};
+
+/* المعرّف الثابت لقسم «بكالوريات» الافتراضي في كل مادة */
+function bakSectionId(subjectId) { return 'sec-bak-' + subjectId; }
+
+function ensureSectionsArray(data) {
+  if (!Array.isArray(data.sections)) data.sections = [];
+  return data.sections;
+}
+
+function getSection(data, id) {
+  var s = ensureSectionsArray(data).find(function (x) { return x.id === id; }) || null;
+  if (s && s.hidden && !window.AYA_ADMIN_MODE) return null;
+  return s;
+}
+
+function isSectionNode(data, id) {
+  return !!id && ensureSectionsArray(data).some(function (x) { return x.id === id; });
+}
+
+function sectionsOf(data, subjectId, parentId, includeHidden) {
+  var showAll = !!(includeHidden || window.AYA_ADMIN_MODE);
+  return ensureSectionsArray(data).filter(function (s) {
+    var p = s.parentId || '';
+    return s.subjectId === subjectId && p === (parentId || '') && (showAll || !s.hidden);
+  }).sort(byOrder);
+}
+
+function rootSectionsOf(data, subjectId, includeHidden) { return sectionsOf(data, subjectId, '', includeHidden); }
+function sectionChildrenOf(data, parentId, includeHidden) {
+  var showAll = !!(includeHidden || window.AYA_ADMIN_MODE);
+  return ensureSectionsArray(data).filter(function (s) {
+    return (s.parentId || '') === parentId && (showAll || !s.hidden);
+  }).sort(byOrder);
+}
+
+/* كل الأقسام المرئية في المادة مصنّفة حسب نوعها */
+function subjectTabsOf(data, subjectId, includeHidden) {
+  return rootSectionsOf(data, subjectId, includeHidden).filter(function (s) { return s.kind === 'tab'; });
+}
+function subjectTopicsOf(data, subjectId, includeHidden) {
+  return rootSectionsOf(data, subjectId, includeHidden).filter(function (s) { return s.kind === 'topic'; });
+}
+function subjectExercisesOf(data, subjectId, includeHidden) {
+  return rootSectionsOf(data, subjectId, includeHidden).filter(function (s) { return s.kind === 'exercise'; });
+}
+
+/* يضمن وجود قسم «بكالوريات» الافتراضي لكل مادة (بدون حفظ — الحفظ يتم من لوحة التحكم) */
+function ensureBakSections(data, subjectIds) {
+  ensureSectionsArray(data);
+  var ids = subjectIds || (data.subjects || []).map(function (s) { return s.id; });
+  ids.forEach(function (sid) {
+    var id = bakSectionId(sid);
+    var exists = data.sections.some(function (x) { return x.id === id; });
+    if (exists) return;
+    var maxOrder = data.sections.filter(function (x) { return x.subjectId === sid && !(x.parentId || ''); })
+      .reduce(function (m, x) { return Math.max(m, x.order || 0); }, 0);
+    data.sections.push({
+      id: id, subjectId: sid, parentId: '', title: 'بكالوريات',
+      icon: 'cap', kind: 'tab', hidden: false, order: maxOrder + 1
+    });
+  });
+  return data.sections;
+}
+
+/* سلسلة آباء القسم من الجذر إلى القسم الحالي */
+function sectionPath(data, sectionId) {
+  var chain = [];
+  var cur = getSection(data, sectionId);
+  var guard = 0;
+  while (cur && guard++ < 25) {
+    chain.unshift(cur);
+    cur = cur.parentId ? getSection(data, cur.parentId) : null;
+  }
+  if (!chain.length) return null;
+  var head = chain[0];
+  return { sections: chain, section: chain[chain.length - 1], subject: getSubject(data, head.subjectId) };
+}
+
+/* عدد العناصر (أقسام فرعية + موارد) داخل قسم — للعرض في البطاقات */
+function sectionItemsCount(data, sectionId) {
+  return resourcesOf(data, sectionId).length;
+}
+function sectionChildrenCount(data, sectionId) {
+  return sectionChildrenOf(data, sectionId).length;
+}
+
+/* حقول الحاوية عند إنشاء مورد جديد: درس/تمرين أم قسم ديناميكي */
+function containerFields(data, containerId) {
+  return isSectionNode(data, containerId) ? { sectionId: containerId } : { lessonId: containerId };
+}
+function applyContainer(data, rec, containerId) {
+  if (isSectionNode(data, containerId)) { rec.sectionId = containerId; rec.lessonId = ''; }
+  else { rec.lessonId = containerId; }
+  return rec;
 }
 
 /* تجميع الموارد المرتبة في فقرات/مجموعات ديناميكية (عنوان + عنصر أو عدة عناصر) */
@@ -536,3 +648,18 @@ function deleteFileIfUploaded(url) {
   if (isIdbUrl(url)) return fileDelete(url.slice(4));
   return Promise.resolve();
 }
+
+/* ============================================================
+   ضبط متغيّر عرض الشاشة الفعلي (بدون شريط التمرير)
+   يُستعمل في المشغّل الممتد بعرض الصفحة كاملاً
+   ============================================================ */
+(function () {
+  function setVw() {
+    try {
+      document.documentElement.style.setProperty('--vw', document.documentElement.clientWidth + 'px');
+    } catch (e) { /* تجاهل */ }
+  }
+  setVw();
+  window.addEventListener('resize', setVw);
+  window.addEventListener('orientationchange', setVw);
+})();
