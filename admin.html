@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
-<body>
+<body class="admin-body">
 
   <!-- بوابة كلمة السر الخاصة بلوحة التحكم -->
   <div class="auth-body" id="adminGate" hidden>
@@ -41,39 +41,70 @@
 
   <!-- التطبيق -->
   <div id="adminApp" hidden>
-    <header class="topbar">
-      <div class="topbar-inner">
-        <a class="logo" href="home.html">
-          <span class="logo-icon"><i data-icon="gear"></i></span>
-          <span class="logo-text">لوحة <b>التحكم</b></span>
-          <span class="logo-year">آية باك 2027</span>
-        </a>
-      <div class="top-actions">
-        <span class="cloud-badge off" id="cloudStatus"><i data-icon="cloud"></i> …</span>
-        <button type="button" class="btn btn-sm" id="topAdminSchedBtn"><i data-icon="calendar"></i> استعمال الزمن</button>
-        <a class="btn btn-sm btn-primary" href="home.html"><i data-icon="eye"></i> معاينة الموقع</a>
-        <button class="btn btn-sm btn-danger" id="logoutBtn"><i data-icon="logout"></i> خروج</button>
+    <div class="admin-shell" id="adminShell">
+
+      <!-- الدراور الجانبي -->
+      <aside class="admin-drawer" id="adminDrawer" aria-label="قائمة لوحة التحكم">
+        <div class="drawer-head">
+          <a class="logo" href="home.html">
+            <span class="logo-icon"><i data-icon="gear"></i></span>
+            <span class="logo-text">لوحة <b>التحكم</b></span>
+          </a>
+          <button type="button" class="drawer-close" id="drawerClose" aria-label="إغلاق القائمة"><i data-icon="x"></i></button>
+        </div>
+
+        <div class="drawer-scroll">
+          <p class="nav-label">عام</p>
+          <button type="button" class="nav-link" data-tab="overview"><i data-icon="chart"></i> <span>نظرة عامة</span></button>
+
+          <p class="nav-label">المحتوى الدراسي</p>
+          <button type="button" class="nav-link" data-tab="subjects"><i data-icon="book"></i> <span>المواد</span></button>
+          <button type="button" class="nav-link" data-tab="organizer"><i data-icon="layers"></i> <span>منظّم المحتوى</span></button>
+          <button type="button" class="nav-link" data-tab="units"><i data-icon="layers"></i> <span>الوحدات</span></button>
+          <button type="button" class="nav-link" data-tab="lessons"><i data-icon="film"></i> <span>الدروس</span></button>
+          <button type="button" class="nav-link" data-tab="exercises"><i data-icon="pencil"></i> <span>التمارين</span></button>
+          <button type="button" class="nav-link" data-tab="content"><i data-icon="plus"></i> <span>محتوى الدرس والتمارين</span></button>
+
+          <p class="nav-label">صفحات المادة</p>
+          <button type="button" class="nav-link" data-tab="sections"><i data-icon="cap"></i> <span>الأقسام والبكالوريات</span></button>
+
+          <p class="nav-label">أدوات</p>
+          <button type="button" class="nav-link" data-tab="schedule"><i data-icon="calendar"></i> <span>استعمال الزمن</span></button>
+          <button type="button" class="nav-link" data-tab="ai"><i data-icon="sparkles"></i> <span>الذكاء الاصطناعي</span></button>
+          <button type="button" class="nav-link" data-tab="backup"><i data-icon="save"></i> <span>نسخ احتياطي</span></button>
+        </div>
+
+        <div class="drawer-foot">
+          <span class="cloud-badge off" id="cloudStatus"><i data-icon="cloud"></i> …</span>
+          <a class="btn btn-sm btn-primary btn-block" href="home.html"><i data-icon="eye"></i> معاينة الموقع</a>
+          <button class="btn btn-sm btn-danger btn-block" id="logoutBtn"><i data-icon="logout"></i> خروج</button>
+        </div>
+      </aside>
+
+      <div class="drawer-backdrop" id="drawerBackdrop" hidden></div>
+
+      <div class="admin-main">
+        <header class="topbar admin-topbar">
+          <div class="topbar-inner">
+            <div class="admin-topbar-start">
+              <button type="button" class="icon-btn menu-btn" id="drawerToggle" aria-label="فتح القائمة"><i data-icon="sliders"></i></button>
+              <button type="button" class="icon-btn menu-btn desktop-only" id="drawerCollapse" aria-label="تصغير القائمة"><i data-icon="chevron-right"></i></button>
+              <span class="admin-page-title" id="adminPageTitle">نظرة عامة</span>
+            </div>
+            <div class="top-actions">
+              <button type="button" class="btn btn-sm" id="topAdminSchedBtn"><i data-icon="calendar"></i> استعمال الزمن</button>
+              <a class="btn btn-sm" href="admin.html" title="تحديث"><i data-icon="refresh"></i></a>
+            </div>
+          </div>
+        </header>
+
+        <main class="container admin-container">
+          <section class="panel" id="panel"></section>
+        </main>
+
+        <footer class="footer">آية باك 2027 — لوحة التحكم <i data-icon="dz"></i></footer>
       </div>
-      </div>
-    </header>
-
-    <main class="container">
-      <nav class="tabs" id="tabsNav">
-        <button class="tab active" data-tab="subjects"><i data-icon="book"></i> المواد</button>
-        <button class="tab" data-tab="schedule"><i data-icon="calendar"></i> استعمال الزمن</button>
-        <button class="tab" data-tab="ai"><i data-icon="sparkles"></i> الذكاء الاصطناعي و Claude</button>
-        <button class="tab" data-tab="organizer"><i data-icon="layers"></i> منظّم المحتوى</button>
-        <button class="tab" data-tab="units"><i data-icon="layers"></i> الوحدات</button>
-        <button class="tab" data-tab="lessons"><i data-icon="film"></i> الدروس</button>
-        <button class="tab" data-tab="exercises"><i data-icon="pencil"></i> التمارين</button>
-        <button class="tab" data-tab="content"><i data-icon="plus"></i> محتوى الدرس والتمارين</button>
-        <button class="tab" data-tab="backup"><i data-icon="save"></i> نسخ احتياطي</button>
-      </nav>
-
-      <section class="panel" id="panel"></section>
-    </main>
-
-    <footer class="footer">آية باك 2027 — لوحة التحكم <i data-icon="dz"></i></footer>
+    </div>
   </div>
 
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>

@@ -130,6 +130,12 @@ window.DEFAULT_DATA = {
     { id: 'l-isl-3-1', unitId: 'u-isl-3', title: 'القيم الإسلامية في الحياة', order: 1 }
   ],
 
+  /* الأقسام والصفحات الديناميكية داخل كل مادة
+     (مثال: بكالوريات ← سنوات ← مواضيع الامتحان، أو أي صفحة يضيفها الأدمن)
+     kind: tab (تبويب في صفحة المادة) | topic (موضوع) | exercise (تمرين خارج الدروس)
+           folder (مجلد: سنوات/مجموعات) | page (صفحة محتوى) */
+  sections: [],
+
   /* الموارد: kind = video | pdf | image | exercise  (exerciseType: video | pdf | link) */
   resources: [
     /* نموذج تجريبي — درس "نهاية دالة" في الرياضيات */

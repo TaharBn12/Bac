@@ -30,6 +30,7 @@
     <section class="hero">
       <h1>أهلاً بك في <span>آية باك 2027</span> <i data-icon="sparkles"></i></h1>
       <p>كل مواد البكالوريا: وحدات، دروس بالفيديو، ملخصات PDF، صور توضيحية وتمارين</p>
+      <div class="subj-stats home-stats" id="homeStats"></div>
       <div class="search-wrap">
         <span class="ico"><i data-icon="search"></i></span>
         <input type="search" id="searchInput" placeholder="ابحث عن مادة..." autocomplete="off">
@@ -61,7 +62,29 @@
       hydrateIcons();
       initData().then(function () {
       var data = loadData();
+      ensureSectionsArray(data);
+      ensureBakSections(data, (data.subjects || []).map(function (s) { return s.id; }));
       var allVisibleSubjects = visibleSubjectsOf(data);
+
+      /* شريط إحصائيات سريع أعلى الصفحة */
+      var statsMount = $('#homeStats');
+      if (statsMount) {
+        var tUnits = 0, tLessons = 0, tEx = 0, tSections = 0;
+        allVisibleSubjects.forEach(function (s) {
+          unitsOf(data, s.id).forEach(function (u) {
+            tUnits++;
+            tLessons += lessonsOf(data, u.id).length;
+            tEx += unitExercisesOf(data, u.id).length;
+          });
+          tSections += (rootSectionsOf(data, s.id) || []).length;
+        });
+        statsMount.innerHTML =
+          '<span class="sstat">' + svgIcon('book') + ' <b>' + allVisibleSubjects.length + '</b> مادة</span>' +
+          '<span class="sstat">' + svgIcon('layers') + ' <b>' + tUnits + '</b> وحدة</span>' +
+          '<span class="sstat">' + svgIcon('film') + ' <b>' + tLessons + '</b> درس</span>' +
+          '<span class="sstat">' + svgIcon('pencil') + ' <b>' + tEx + '</b> تمرين</span>' +
+          '<span class="sstat">' + svgIcon('cap') + ' <b>' + tSections + '</b> أقسام وبكالوريات</span>';
+      }
 
       /* بطاقة استعمال الزمن الدراسي الأسبوعي */
       var promoMount = $('#schedulePromoMount');

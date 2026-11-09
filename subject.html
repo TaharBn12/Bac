@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>آية باك 2027 — الوحدات</title>
+  <title>آية باك 2027 — المادة</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%23f5c542'/%3E%3Cpath d='M50 24 12 42l38 18 38-18z' fill='%231a1440'/%3E%3Cpath d='M26 52v16c0 7 10.7 12 24 12s24-5 24-12V52l-14 6.6V66c0 3-4.5 5.5-10 5.5s-10-2.5-10-5.5v-7.4z' fill='%231a1440'/%3E%3Cpath d='M88 42v18' stroke='%231a1440' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -29,7 +29,8 @@
   <main class="container page">
     <div id="crumbs"></div>
     <div id="head"></div>
-    <div class="list" id="unitsList"></div>
+    <nav class="sub-tabs" id="subTabs" aria-label="أقسام المادة"></nav>
+    <div id="subBody"></div>
   </main>
 
   <footer class="footer">آية باك 2027 <i data-icon="dz"></i></footer>
@@ -48,58 +49,223 @@
       requireAuth();
       hydrateIcons();
       initData().then(function () {
-      var data = loadData();
+        var data = loadData();
 
-      var subject = getSubject(data, param('subject'));
-      if (!subject) { location.replace('home.html'); return; }
-      var coeff = getSubjectCoefficient(subject);
+        var subject = getSubject(data, param('subject'));
+        if (!subject) { location.replace('home.html'); return; }
 
-      /* مسار التنقل */
-      $('#crumbs').innerHTML = breadcrumb([
-        { label: 'الرئيسية', href: 'home.html', icon: 'home' },
-        { label: subject.name }
-      ]);
+        ensureSectionsArray(data);
+        ensureBakSections(data, [subject.id]);
 
-      /* الترويسة */
-      $('#head').innerHTML =
-        '<div class="page-head ' + (subject.color ? 'c-' + subject.color : '') + '">' +
-          '<div class="icon">' + iconHTML(subject.icon, 'book') + '</div>' +
-          '<div>' +
-            '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">' +
-              '<h1>' + escapeHtml(subject.name) + '</h1>' +
-              '<span class="subj-coeff-badge">المعامل ' + coeff + '</span>' +
-            '</div>' +
-            '<div class="meta">اختر الوحدة لتصفّح الدروس أو التمارين</div>' +
-          '</div>' +
-        '</div>';
+        var coeff = getSubjectCoefficient(subject);
+        var colorClass = subject.color ? 'c-' + subject.color : '';
+        var units = unitsOf(data, subject.id);
+        var tabs = subjectTabsOf(data, subject.id);
 
-      /* قائمة الوحدات (معروضة بشكل مباشر وواضح للمستخدم دون طيّ) */
-      var units = unitsOf(data, subject.id);
-      var listEl = $('#unitsList');
+        /* التبويب الحالي: دروس | مواضيع | تمارين */
+        var active = param('tab') || 'units';
+        if (['units', 'topics', 'exercises'].indexOf(active) === -1) active = 'units';
 
-      if (!units.length) {
-        listEl.outerHTML = '<div class="empty">لا توجد وحدات في هذه المادة بعد</div>';
-      } else {
-        listEl.innerHTML = units.map(function (u, i) {
+        /* ---------- مسار التنقل ---------- */
+        $('#crumbs').innerHTML = breadcrumb([
+          { label: 'الرئيسية', href: 'home.html', icon: 'home' },
+          { label: subject.name }
+        ]);
+
+        /* ---------- إحصائيات المادة ---------- */
+        var lessonsCount = 0, exCount = 0, doneCount = 0, topicPages = subjectTopicsOf(data, subject.id).length;
+        units.forEach(function (u) {
           var ls = lessonsOf(data, u.id);
           var exs = unitExercisesOf(data, u.id);
-          var doneCount = ls.concat(exs).filter(function (it) { return isItemCompleted(it.id); }).length;
-          var totalCount = ls.length + exs.length;
+          lessonsCount += ls.length;
+          exCount += exs.length;
+          ls.concat(exs).forEach(function (it) { if (isItemCompleted(it.id)) doneCount++; });
+        });
+        var totalItems = lessonsCount + exCount;
 
-          return '<a class="row-card ' + (subject.color ? 'c-' + subject.color : '') + '" href="unit.html?unit=' + encodeURIComponent(u.id) + '">' +
-            '<div class="num">' + (i + 1) + '</div>' +
-            '<div class="info"><div class="t">' + escapeHtml(u.title) + '</div>' +
-            '<div class="badges">' +
-              '<span class="badge' + (ls.length ? ' on' : '') + '">' + svgIcon('film') + ' ' + ls.length + ' دروس</span>' +
-              '<span class="badge' + (exs.length ? ' on' : '') + '">' + svgIcon('pencil') + ' ' + exs.length + ' تمارين</span>' +
-              (doneCount ? '<span class="badge done-badge">' + svgIcon('check-circle') + ' مكتمل ' + doneCount + '/' + totalCount + '</span>' : '') +
-            '</div></div>' +
-            '<div class="arrow">‹</div>' +
+        /* ---------- الترويسة ---------- */
+        $('#head').innerHTML =
+          '<div class="page-head subject-hero ' + colorClass + '">' +
+            '<div class="icon">' + iconHTML(subject.icon, 'book') + '</div>' +
+            '<div class="subj-hero-body">' +
+              '<div class="subj-hero-title-row">' +
+                '<h1>' + escapeHtml(subject.name) + '</h1>' +
+                '<span class="subj-coeff-badge">المعامل ' + coeff + '</span>' +
+              '</div>' +
+              '<div class="meta">اختر القسم الذي تريد المراجعة منه: الدروس، المواضيع، التمارين أو بكالوريات السنوات السابقة</div>' +
+              '<div class="subj-stats">' +
+                '<span class="sstat">' + svgIcon('layers') + ' <b>' + units.length + '</b> وحدات</span>' +
+                '<span class="sstat">' + svgIcon('film') + ' <b>' + lessonsCount + '</b> دروس</span>' +
+                '<span class="sstat">' + svgIcon('pencil') + ' <b>' + exCount + '</b> تمارين</span>' +
+                '<span class="sstat">' + svgIcon('cap') + ' <b>' + tabs.length + '</b> أقسام</span>' +
+                (totalItems ? '<span class="sstat done">' + svgIcon('check-circle') + ' مكتمل <b>' + doneCount + '</b> / ' + totalItems + '</span>' : '') +
+              '</div>' +
+            '</div>' +
+          '</div>';
+
+        /* ---------- شريط التبويبات ---------- */
+        function tabBtn(id, label, icon) {
+          return '<button type="button" class="sub-tab' + (active === id ? ' active' : '') + '" data-tab="' + id + '">' +
+            svgIcon(icon) + '<span>' + label + '</span></button>';
+        }
+
+        var tabsHTML =
+          '<div class="sub-tabs-inner">' +
+            tabBtn('units', 'الوحدات والدروس', 'layers') +
+            tabBtn('topics', 'المواضيع', 'book-open') +
+            tabBtn('exercises', 'التمارين', 'pencil') +
+          '</div>' +
+          '<div class="sub-tabs-sections">' +
+            tabs.map(function (s) {
+              return '<a class="sub-tab sub-tab-link" href="section.html?section=' + encodeURIComponent(s.id) + '">' +
+                iconHTML(s.icon, 'file') + '<span>' + escapeHtml(s.title) + '</span>' +
+                (sectionChildrenOf(data, s.id).length
+                  ? '<em>' + sectionChildrenOf(data, s.id).length + '</em>'
+                  : '') + '</a>';
+            }).join('') +
+          '</div>';
+        var tabsEl = $('#subTabs');
+        tabsEl.innerHTML = tabsHTML;
+
+        tabsEl.addEventListener('click', function (e) {
+          var b = e.target.closest('[data-tab]');
+          if (!b) return;
+          active = b.dataset.tab;
+          $all('.sub-tab', tabsEl).forEach(function (x) { x.classList.toggle('active', x === b); });
+          try {
+            history.replaceState(null, '', 'subject.html?subject=' + encodeURIComponent(subject.id) + '&tab=' + active);
+          } catch (err) { /* تجاهل */ }
+          renderBody();
+        });
+
+        /* ---------- المحتوى حسب التبويب ---------- */
+        var bodyEl = $('#subBody');
+
+        function cardBadges(lessonId, isEx) {
+          var v = resourcesOf(data, lessonId, 'video').length;
+          var p = resourcesOf(data, lessonId, 'pdf').length;
+          var i = resourcesOf(data, lessonId, 'image').length;
+          var out = '';
+          if (v) out += '<span class="badge on">' + svgIcon('film') + ' ' + v + '</span>';
+          if (p) out += '<span class="badge on">' + svgIcon('file') + ' ' + p + '</span>';
+          if (i) out += '<span class="badge on">' + svgIcon('image') + ' ' + i + '</span>';
+          if (!out) out = '<span class="badge">' + (isEx ? 'لا محتوى بعد' : 'لا محتوى بعد') + '</span>';
+          return '<div class="badges">' + out + '</div>';
+        }
+
+        function lessonCard(l, unitName) {
+          var done = isItemCompleted(l.id);
+          return '<a class="mini-card' + (done ? ' is-done' : '') + ' ' + colorClass + '" href="lesson.html?lesson=' + encodeURIComponent(l.id) + '">' +
+            '<span class="mc-top">' +
+              '<span class="mc-ico">' + svgIcon('film') + '</span>' +
+              (done ? '<span class="mc-done">' + svgIcon('check-circle') + '</span>' : '') +
+            '</span>' +
+            '<span class="mc-title">' + escapeHtml(l.title) + '</span>' +
+            (unitName ? '<span class="mc-sub">' + svgIcon('layers') + ' ' + escapeHtml(unitName) + '</span>' : '') +
+            cardBadges(l.id, false) +
           '</a>';
-        }).join('');
-      }
+        }
 
-      $('#logoutBtn').addEventListener('click', doLogout);
+        function exerciseCard(l, unitName) {
+          var done = isItemCompleted(l.id);
+          return '<a class="mini-card ex' + (done ? ' is-done' : '') + ' ' + colorClass + '" href="lesson.html?lesson=' + encodeURIComponent(l.id) + '">' +
+            '<span class="mc-top">' +
+              '<span class="mc-ico">' + svgIcon('pencil') + '</span>' +
+              (done ? '<span class="mc-done">' + svgIcon('check-circle') + '</span>' : '') +
+            '</span>' +
+            '<span class="mc-title">' + escapeHtml(l.title) + '</span>' +
+            (unitName ? '<span class="mc-sub">' + svgIcon('layers') + ' ' + escapeHtml(unitName) + '</span>' : '') +
+            cardBadges(l.id, true) +
+          '</a>';
+        }
+
+        function sectionCard(s) {
+          var kids = sectionChildrenOf(data, s.id).length;
+          var res = resourcesOf(data, s.id).length;
+          return '<a class="sec-card ' + colorClass + '" href="section.html?section=' + encodeURIComponent(s.id) + '">' +
+            '<span class="sec-ico">' + iconHTML(s.icon, 'file') + '</span>' +
+            '<span class="sec-body">' +
+              '<span class="sec-title">' + escapeHtml(s.title) + '</span>' +
+              '<span class="badges">' +
+                (kids ? '<span class="badge on">' + svgIcon('layers') + ' ' + kids + ' أقسام فرعية</span>' : '') +
+                (res ? '<span class="badge on">' + svgIcon('file') + ' ' + res + ' عنصر</span>' : '') +
+                (!kids && !res ? '<span class="badge">لا محتوى بعد</span>' : '') +
+              '</span>' +
+            '</span>' +
+            '<span class="sec-arrow">‹</span>' +
+          '</a>';
+        }
+
+        function renderUnits() {
+          if (!units.length) {
+            bodyEl.innerHTML = '<div class="empty">لا توجد وحدات في هذه المادة بعد</div>';
+            return;
+          }
+          bodyEl.innerHTML = '<div class="list">' + units.map(function (u, i) {
+            var ls = lessonsOf(data, u.id);
+            var exs = unitExercisesOf(data, u.id);
+            var doneCount2 = ls.concat(exs).filter(function (it) { return isItemCompleted(it.id); }).length;
+            var totalCount = ls.length + exs.length;
+            return '<a class="row-card ' + colorClass + '" href="unit.html?unit=' + encodeURIComponent(u.id) + '">' +
+              '<div class="num">' + (i + 1) + '</div>' +
+              '<div class="info"><div class="t">' + escapeHtml(u.title) + '</div>' +
+              '<div class="badges">' +
+                '<span class="badge' + (ls.length ? ' on' : '') + '">' + svgIcon('film') + ' ' + ls.length + ' دروس</span>' +
+                '<span class="badge' + (exs.length ? ' on' : '') + '">' + svgIcon('pencil') + ' ' + exs.length + ' تمارين</span>' +
+                (doneCount2 ? '<span class="badge done-badge">' + svgIcon('check-circle') + ' مكتمل ' + doneCount2 + '/' + totalCount + '</span>' : '') +
+              '</div></div>' +
+              '<div class="arrow">‹</div>' +
+            '</a>';
+          }).join('') + '</div>';
+        }
+
+        function renderTopics() {
+          var extra = subjectTopicsOf(data, subject.id);
+          var html = '';
+          if (extra.length) {
+            html += '<h2 class="sub-title">' + svgIcon('sparkles') + ' مواضيع مضافة</h2>' +
+              '<div class="grid mini-grid">' + extra.map(sectionCard).join('') + '</div>';
+          }
+          if (!units.length && !extra.length) {
+            bodyEl.innerHTML = '<div class="empty">لا توجد مواضيع في هذه المادة بعد</div>';
+            return;
+          }
+          units.forEach(function (u) {
+            var ls = lessonsOf(data, u.id);
+            if (!ls.length) return;
+            html += '<h2 class="sub-title">' + svgIcon('layers') + ' ' + escapeHtml(u.title) + '</h2>' +
+              '<div class="grid mini-grid">' + ls.map(function (l) { return lessonCard(l, ''); }).join('') + '</div>';
+          });
+          bodyEl.innerHTML = html || '<div class="empty">لا توجد مواضيع في هذه المادة بعد</div>';
+        }
+
+        function renderExercises() {
+          var pages = subjectExercisesOf(data, subject.id);
+          var html = '';
+          if (pages.length) {
+            html += '<h2 class="sub-title">' + svgIcon('sparkles') + ' تمارين خارج الدروس</h2>' +
+              '<div class="grid mini-grid">' + pages.map(sectionCard).join('') + '</div>';
+          }
+          units.forEach(function (u) {
+            var exs = unitExercisesOf(data, u.id);
+            if (!exs.length) return;
+            html += '<h2 class="sub-title">' + svgIcon('layers') + ' ' + escapeHtml(u.title) + '</h2>' +
+              '<div class="grid mini-grid">' + exs.map(function (x) { return exerciseCard(x, ''); }).join('') + '</div>';
+          });
+          if (!html) {
+            html = '<div class="empty">' + svgIcon('pencil') + ' لا توجد تمارين في هذه المادة بعد</div>';
+          }
+          bodyEl.innerHTML = html;
+        }
+
+        function renderBody() {
+          if (active === 'units') renderUnits();
+          else if (active === 'topics') renderTopics();
+          else renderExercises();
+        }
+
+        renderBody();
+        $('#logoutBtn').addEventListener('click', doLogout);
       });
     })();
   </script>

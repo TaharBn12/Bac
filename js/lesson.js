@@ -238,6 +238,7 @@ AyaPlayer.prototype.load = function (item) {
 
     /* ملف / رابط مباشر → مشغلنا المخصص */
     self.box.querySelectorAll('iframe').forEach(function (f) { f.remove(); });
+    self.setFullBleed(false);
     self.video.style.display = '';
     self.video.src = res.src;
     self.nowLbl.textContent = item.title || '';
@@ -249,6 +250,18 @@ AyaPlayer.prototype.load = function (item) {
   });
 };
 
+/* تبديل وضع «ملء عرض الصفحة»: مشغل يوتيوب بعرض الشاشة كاملاً وبدون حواف */
+AyaPlayer.prototype.setFullBleed = function (on) {
+  if (!this.box) return;
+  this.box.classList.toggle('is-yt', !!on);
+  var sec = this.box.closest ? this.box.closest('.lesson-section, .lesson-sec-content, .player-shell') : null;
+  if (sec) sec.classList.toggle('has-fullbleed', !!on);
+  var wrap = this.box.closest ? this.box.closest('.lesson-section') : null;
+  if (wrap) wrap.classList.toggle('has-fullbleed', !!on);
+  var content = this.box.closest ? this.box.closest('.lesson-sec-content') : null;
+  if (content) content.classList.toggle('has-fullbleed', !!on);
+};
+
 AyaPlayer.prototype.toYoutubeMode = function (ytId, title) {
   /* نستبدل المحتوى بمشغل يوتيوب */
   this.video.removeAttribute('src');
@@ -257,6 +270,9 @@ AyaPlayer.prototype.toYoutubeMode = function (ytId, title) {
   this.center.style.display = 'none';
   this.nowLbl.textContent = '';
   this.dlBtn.hidden = true;
+
+  /* مشغل يوتيوب يأخذ عرض الصفحة كاملاً بدون حواف جانبية */
+  this.setFullBleed(true);
 
   var old = this.box.querySelector('iframe');
   if (old) old.remove();
@@ -296,6 +312,23 @@ function initLessonPage() {
   ]);
   $('#lessonTitle').innerHTML =
     (isExPage ? svgIcon('pencil') : iconHTML(subject.icon, 'film')) + ' ' + escapeHtml(lesson.title);
+
+  /* سطر معلومات أسفل العنوان: المادة › الوحدة › النوع */
+  var metaEl = $('#lessonMeta');
+  if (metaEl) {
+    var vids0 = resourcesOf(data, lesson.id, 'video').length;
+    var pdfs0 = resourcesOf(data, lesson.id, 'pdf').length;
+    var imgs0 = resourcesOf(data, lesson.id, 'image').length;
+    var exs0  = resourcesOf(data, lesson.id, 'exercise').length;
+    metaEl.innerHTML =
+      '<span class="sstat">' + svgIcon('book') + ' ' + escapeHtml(subject.name) + '</span>' +
+      '<span class="sstat">' + svgIcon('layers') + ' ' + escapeHtml(unit.title) + '</span>' +
+      '<span class="sstat">' + svgIcon(isExPage ? 'pencil' : 'film') + ' ' + (isExPage ? 'تمرين' : 'درس') + '</span>' +
+      (vids0 ? '<span class="sstat">' + svgIcon('film') + ' <b>' + vids0 + '</b> فيديو</span>' : '') +
+      (pdfs0 ? '<span class="sstat">' + svgIcon('file') + ' <b>' + pdfs0 + '</b> PDF</span>' : '') +
+      (imgs0 ? '<span class="sstat">' + svgIcon('image') + ' <b>' + imgs0 + '</b> صورة</span>' : '') +
+      (exs0 ? '<span class="sstat">' + svgIcon('pencil') + ' <b>' + exs0 + '</b> تمرين</span>' : '');
+  }
 
   /* زر إكمال الدرس أو التمرين (يتزامن مع استعمال الزمن الأسبوعي ويتحول للأخضر) */
   var completeBar = $('#lessonCompleteBar');

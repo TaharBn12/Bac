@@ -10,6 +10,8 @@
 var Cloud = {
   mode: 'local',        /* 'cloud' | 'local' */
   setupMissing: false,  /* true = جداول Supabase لم تُنشأ بعد */
+  sectionsMissing: false,      /* true = جدول الأقسام الديناميكية غير منشأ بعد */
+  sectionColumnsMissing: false,/* true = قاعدة قديمة بدون عمود section_id */
   lastError: null,
   client: null,         /* عميل القراءة (بدون ترويسة الإدارة) */
   adminClient: null,    /* عميل الكتابة (مع ترويسة كلمة السر) */
@@ -87,17 +89,24 @@ Cloud.loadAll = function () {
       c.from('lessons').select('*'),
       c.from('resources').select('*'),
       c.from('aya_study_schedule').select('*').then(function (r) { return r; }, function () { return { data: null, error: null }; }),
-      c.from('aya_completed_items').select('*').then(function (r) { return r; }, function () { return { data: null, error: null }; })
+      c.from('aya_completed_items').select('*').then(function (r) { return r; }, function () { return { data: null, error: null }; }),
+      /* الأقسام والصفحات الديناميكية (بكالوريات، سنوات...) — تُقرأ إن كان جدولها منشأً */
+      c.from('aya_sections').select('*').then(function (r) {
+        if (r && r.error) { Cloud.sectionsMissing = true; return { data: null, error: null }; }
+        return r;
+      }, function () { Cloud.sectionsMissing = true; return { data: null, error: null }; })
     ]);
   }).then(function (rs) {
     for (var i = 0; i < 4; i++) {
       if (rs[i] && rs[i].error) throw rs[i].error;
     }
+    if (rs[6] && rs[6].error) Cloud.sectionsMissing = true;
     var d = {
       subjects:  (rs[0].data || []).map(rowToSubject).sort(byOrder),
       units:     (rs[1].data || []).map(rowToUnit).sort(byOrder),
       lessons:   (rs[2].data || []).map(rowToLesson).sort(byOrder),
-      resources: (rs[3].data || []).map(rowToResource).sort(byOrder)
+      resources: (rs[3].data || []).map(rowToResource).sort(byOrder),
+      sections:  (rs[6] && rs[6].data ? rs[6].data : []).map(rowToSection).sort(byOrder)
     };
     Cloud.snapshot = snapshotOf(d);
 
@@ -198,7 +207,8 @@ Cloud._sync = function (data) {
     { name: 'subjects',  rows: data.subjects.map(subjectToRow) },
     { name: 'units',     rows: data.units.map(unitToRow) },
     { name: 'lessons',   rows: data.lessons.map(lessonToRow) },
-    { name: 'resources', rows: data.resources.map(resourceToRow) }
+    { name: 'resources', rows: data.resources.map(resourceToRow) },
+    { name: 'aya_sections', rows: ensureSectionsArray(data).map(sectionToRow), optional: true }
   ];
 
   var jobs = [];
@@ -209,6 +219,27 @@ Cloud._sync = function (data) {
     jobs.push(c.from(t.name).upsert(t.rows, { onConflict: 'id' }).then(function (res) {
       if (res && res.error) {
         var errMsg = String(res.error.message || '');
+
+        /* جدول الأقسام الديناميكية اختياري: إن لم تُنفَّذ النسخة المحدَّثة من
+           supabase-setup.sql نتجاهله ونكمل مزامنة بقية المحتوى دون توقف */
+        if (t.optional || /aya_sections/i.test(errMsg)) {
+          self.sectionsMissing = true;
+          console.warn('تعذّرت مزامنة الأقسام الديناميكية — نفّذ النسخة المحدَّثة من supabase-setup.sql');
+          return;
+        }
+
+        /* قاعدة بيانات قديمة بدون عمود section_id → نعيد المحاولة بدونه */
+        if (t.name === 'resources' && /section_id/i.test(errMsg)) {
+          self.sectionColumnsMissing = true;
+          var legacyRows = t.rows.map(function (r) {
+            var copy = {};
+            Object.keys(r).forEach(function (k) { if (k !== 'section_id') copy[k] = r[k]; });
+            return copy;
+          });
+          return c.from(t.name).upsert(legacyRows, { onConflict: 'id' }).then(function (resS) {
+            if (resS && resS.error) throw new Error(t.name + ': ' + resS.error.message);
+          });
+        }
         /* توافق رجعي آمن إذا لم تُضف الأعمدة الجديدة بعد في قاعدة خارجية قديمة */
         if (t.name === 'subjects' && /coefficient|is_hidden/i.test(errMsg)) {
           var legacySubjects = t.rows.map(function (r) {
@@ -253,12 +284,17 @@ Cloud._sync = function (data) {
 
   /* 2) حذف الصفوف التي لم تعد موجودة */
   var current = snapshotOf(data);
-  var snap = this.snapshot || { subjects: [], units: [], lessons: [], resources: [] };
-  Object.keys(snap).forEach(function (tn) {
-    var toDelete = snap[tn].filter(function (id) { return current[tn].indexOf(id) === -1; });
+  var snap = this.snapshot || { subjects: [], units: [], lessons: [], resources: [], sections: [] };
+  Object.keys(snap).forEach(function (key) {
+    var tn = key === 'sections' ? 'aya_sections' : key;
+    if (tn === 'aya_sections' && self.sectionsMissing) return;
+    var toDelete = (snap[key] || []).filter(function (id) { return (current[key] || []).indexOf(id) === -1; });
     if (!toDelete.length) return;
     jobs.push(c.from(tn).delete().in('id', toDelete).then(function (res) {
-      if (res && res.error) throw new Error(tn + ' (حذف): ' + res.error.message);
+      if (res && res.error) {
+        if (tn === 'aya_sections') { self.sectionsMissing = true; return; }
+        throw new Error(tn + ' (حذف): ' + res.error.message);
+      }
     }));
   });
 
@@ -350,13 +386,21 @@ function lessonToRow(l) {
 }
 function resourceToRow(r) {
   return {
-    id: r.id, lesson_id: r.lessonId, kind: r.kind,
+    id: r.id, lesson_id: r.lessonId || null, kind: r.kind,
     title: r.title || '', url: r.url, size: r.size || null,
     exercise_type: r.exerciseType || null,
     group_id: r.groupId || null,
     group_title: r.groupTitle || null,
+    section_id: r.sectionId || null,
     is_hidden: !!r.hidden,
     sort_order: r.order || 0
+  };
+}
+function sectionToRow(s) {
+  return {
+    id: s.id, subject_id: s.subjectId, parent_id: s.parentId || null,
+    title: s.title, icon: s.icon || 'file', kind: s.kind || 'page',
+    is_hidden: !!s.hidden, sort_order: s.order || 0
   };
 }
 function rowToSubject(r) {
@@ -385,12 +429,20 @@ function rowToLesson(r) {
 }
 function rowToResource(r) {
   return {
-    id: r.id, lessonId: r.lesson_id, kind: r.kind, title: r.title,
+    id: r.id, lessonId: r.lesson_id || '', kind: r.kind, title: r.title,
     url: r.url, size: r.size, exerciseType: r.exercise_type,
     groupId: r.group_id || undefined,
     groupTitle: r.group_title || undefined,
+    sectionId: r.section_id || undefined,
     hidden: !!r.is_hidden,
     order: r.sort_order
+  };
+}
+function rowToSection(r) {
+  return {
+    id: r.id, subjectId: r.subject_id, parentId: r.parent_id || '',
+    title: r.title, icon: r.icon || 'file', kind: r.kind || 'page',
+    hidden: !!r.is_hidden, order: r.sort_order
   };
 }
 
@@ -399,6 +451,7 @@ function snapshotOf(d) {
     subjects:  d.subjects.map(function (x) { return x.id; }),
     units:     d.units.map(function (x) { return x.id; }),
     lessons:   d.lessons.map(function (x) { return x.id; }),
-    resources: d.resources.map(function (x) { return x.id; })
+    resources: d.resources.map(function (x) { return x.id; }),
+    sections:  (d.sections || []).map(function (x) { return x.id; })
   };
 }

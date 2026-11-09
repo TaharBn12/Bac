@@ -71,11 +71,50 @@ alter table public.resources add column if not exists group_id text;
 alter table public.resources add column if not exists group_title text;
 alter table public.resources add column if not exists is_hidden boolean not null default false;
 
+-- ربط المورد بقسم/صفحة ديناميكية (بكالوريات، سنة، موضوع...) بدل الدرس
+alter table public.resources add column if not exists section_id text;
+
+-- إزالة شرط "NOT NULL" عن lesson_id حتى يمكن إرفاق المورد بقسم بدل درس
+do $$
+begin
+  alter table public.resources alter column lesson_id drop not null;
+exception when others then null;
+end $$;
+
+-- ---------- الأقسام والصفحات الديناميكية داخل كل مادة ----------
+-- (مثال: تبويب «بكالوريات» ← سنوات 2024/2025/2026 ← مواضيع الامتحان والحلول)
+create table if not exists public.aya_sections (
+  id         text primary key,
+  subject_id text not null references public.subjects(id) on delete cascade,
+  parent_id  text references public.aya_sections(id) on delete cascade,
+  title      text not null,
+  icon       text not null default 'file',
+  kind       text not null default 'page',   -- tab | topic | exercise | folder | page
+  is_hidden  boolean not null default false,
+  sort_order int  not null default 0
+);
+
+create index if not exists aya_sections_subject_idx on public.aya_sections (subject_id, parent_id, sort_order);
+
+-- المرجعية: حذف القسم يحذف موارده تلقائياً
+do $$
+begin
+  if not exists (
+    select 1 from information_schema.table_constraints
+    where constraint_name = 'resources_section_id_fkey' and table_name = 'resources'
+  ) then
+    alter table public.resources
+      add constraint resources_section_id_fkey
+      foreign key (section_id) references public.aya_sections(id) on delete cascade;
+  end if;
+end $$;
+
 -- ---------- 2) تفعيل الحماية (RLS) ----------
 alter table public.subjects  enable row level security;
 alter table public.units     enable row level security;
 alter table public.lessons   enable row level security;
 alter table public.resources enable row level security;
+alter table public.aya_sections enable row level security;
 
 -- ---------- 3) السياسات ----------
 -- القراءة: متاحة للجميع (زوار الموقع)
@@ -84,7 +123,7 @@ do $$
 declare
   t text;
 begin
-  foreach t in array array['subjects', 'units', 'lessons', 'resources'] loop
+  foreach t in array array['subjects', 'units', 'lessons', 'resources', 'aya_sections'] loop
 
     execute format('drop policy if exists "public_read"   on public.%I;', t);
     execute format('drop policy if exists "admin_insert"  on public.%I;', t);
