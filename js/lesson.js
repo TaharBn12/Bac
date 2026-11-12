@@ -301,13 +301,20 @@ function initLessonPage() {
 
   document.title = 'آية باك 2027 — ' + lesson.title;
 
-  /* مسار التنقل + العنوان */
+  /* مسار التنقل + العنوان
+     (التمارين أصبحت مستقلة خارج الوحدات: صفحة التمرين القديم تُنسب إلى تبويب التمارين في المادة) */
   var unitBaseHref = 'unit.html?unit=' + encodeURIComponent(unit.id);
-  $('#crumbs').innerHTML = breadcrumb([
+  var subjectBaseHref = 'subject.html?subject=' + encodeURIComponent(subject.id);
+  $('#crumbs').innerHTML = breadcrumb(isExPage ? [
     { label: 'الرئيسية', href: 'home.html', icon: 'home' },
-    { label: subject.name, href: 'subject.html?subject=' + encodeURIComponent(subject.id) },
+    { label: subject.name, href: subjectBaseHref },
+    { label: 'التمارين', href: subjectBaseHref + '&tab=exercises' },
+    { label: lesson.title }
+  ] : [
+    { label: 'الرئيسية', href: 'home.html', icon: 'home' },
+    { label: subject.name, href: subjectBaseHref + '&tab=units' },
     { label: unit.title, href: unitBaseHref },
-    { label: isExPage ? 'التمارين' : 'الدروس', href: unitBaseHref + '&section=' + (isExPage ? 'exercises' : 'lessons') },
+    { label: 'الدروس', href: unitBaseHref },
     { label: lesson.title }
   ]);
   $('#lessonTitle').innerHTML =

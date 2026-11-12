@@ -228,6 +228,18 @@ Cloud._sync = function (data) {
           return;
         }
 
+        /* قاعدة بيانات قديمة بدون عمود part في جدول الأقسام → نعيد المحاولة بدونه */
+        if (t.name === 'aya_sections' && /part/i.test(errMsg)) {
+          var legacySections = t.rows.map(function (r) {
+            var copy = {};
+            Object.keys(r).forEach(function (k) { if (k !== 'part') copy[k] = r[k]; });
+            return copy;
+          });
+          return c.from(t.name).upsert(legacySections, { onConflict: 'id' }).then(function (resP) {
+            if (resP && resP.error) throw new Error(t.name + ': ' + resP.error.message);
+          });
+        }
+
         /* قاعدة بيانات قديمة بدون عمود section_id → نعيد المحاولة بدونه */
         if (t.name === 'resources' && /section_id/i.test(errMsg)) {
           self.sectionColumnsMissing = true;
@@ -400,6 +412,7 @@ function sectionToRow(s) {
   return {
     id: s.id, subject_id: s.subjectId, parent_id: s.parentId || null,
     title: s.title, icon: s.icon || 'file', kind: s.kind || 'page',
+    part: s.part || null,
     is_hidden: !!s.hidden, sort_order: s.order || 0
   };
 }
@@ -442,6 +455,7 @@ function rowToSection(r) {
   return {
     id: r.id, subjectId: r.subject_id, parentId: r.parent_id || '',
     title: r.title, icon: r.icon || 'file', kind: r.kind || 'page',
+    part: r.part || undefined,
     hidden: !!r.is_hidden, order: r.sort_order
   };
 }

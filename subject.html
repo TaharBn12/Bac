@@ -92,7 +92,7 @@
                 '<h1>' + escapeHtml(subject.name) + '</h1>' +
                 '<span class="subj-coeff-badge">المعامل ' + coeff + '</span>' +
               '</div>' +
-              '<div class="meta">اختر القسم الذي تريد المراجعة منه: الدروس، المواضيع، التمارين أو بكالوريات السنوات السابقة</div>' +
+              '<div class="meta">اختر: <b>الدروس</b> (حسب الوحدات) · <b>التمارين</b> (كل تمرين مع موضوعه وحلّه) · <b>المواضيع</b> · <b>بكالوريات</b> السنوات السابقة</div>' +
               '<div class="subj-stats">' +
                 '<span class="sstat">' + svgIcon('layers') + ' <b>' + units.length + '</b> وحدات</span>' +
                 '<span class="sstat">' + svgIcon('film') + ' <b>' + lessonsCount + '</b> دروس</span>' +
@@ -111,9 +111,9 @@
 
         var tabsHTML =
           '<div class="sub-tabs-inner">' +
-            tabBtn('units', 'الوحدات والدروس', 'layers') +
-            tabBtn('topics', 'المواضيع', 'book-open') +
+            tabBtn('units', 'الدروس', 'film') +
             tabBtn('exercises', 'التمارين', 'pencil') +
+            tabBtn('topics', 'المواضيع', 'book-open') +
           '</div>' +
           '<div class="sub-tabs-sections">' +
             tabs.map(function (s) {
@@ -166,7 +166,8 @@
           '</a>';
         }
 
-        function exerciseCard(l, unitName) {
+        /* بطاقة تمرين قديم مرتبط بوحدة (يبقى ظاهراً حتى لا يضيع أي محتوى سابق) */
+        function exerciseCardLegacy(l, unitName) {
           var done = isItemCompleted(l.id);
           return '<a class="mini-card ex' + (done ? ' is-done' : '') + ' ' + colorClass + '" href="lesson.html?lesson=' + encodeURIComponent(l.id) + '">' +
             '<span class="mc-top">' +
@@ -179,6 +180,7 @@
           '</a>';
         }
 
+        /* بطاقة قسم عادية (موضوع / صفحة) */
         function sectionCard(s) {
           var kids = sectionChildrenOf(data, s.id).length;
           var res = resourcesOf(data, s.id).length;
@@ -190,6 +192,25 @@
                 (kids ? '<span class="badge on">' + svgIcon('layers') + ' ' + kids + ' أقسام فرعية</span>' : '') +
                 (res ? '<span class="badge on">' + svgIcon('file') + ' ' + res + ' عنصر</span>' : '') +
                 (!kids && !res ? '<span class="badge">لا محتوى بعد</span>' : '') +
+              '</span>' +
+            '</span>' +
+            '<span class="sec-arrow">‹</span>' +
+          '</a>';
+        }
+
+        /* بطاقة تمرين مستقل: تُظهر حالة «الموضوع» و«الحل» */
+        function exerciseCard(s) {
+          var parts = sectionPartsOf(data, s.id);
+          var hasTopic = parts.topic ? sectionHasContent(data, parts.topic.id) : sectionHasContent(data, s.id);
+          var hasSol = parts.solution ? sectionHasContent(data, parts.solution.id) : false;
+          return '<a class="sec-card ex-card ' + colorClass + '" href="section.html?section=' + encodeURIComponent(s.id) + '">' +
+            '<span class="sec-ico">' + iconHTML(s.icon, 'pencil') + '</span>' +
+            '<span class="sec-body">' +
+              '<span class="sec-title">' + escapeHtml(s.title) + '</span>' +
+              '<span class="badges">' +
+                '<span class="badge part-badge' + (hasTopic ? ' on' : ' off') + '">' + svgIcon('file') + ' الموضوع</span>' +
+                '<span class="badge part-badge' + (hasSol ? ' on' : ' off') + '">' + svgIcon('check') + ' الحل' +
+                  (hasSol ? '' : ' — قريباً') + '</span>' +
               '</span>' +
             '</span>' +
             '<span class="sec-arrow">‹</span>' +
@@ -243,14 +264,14 @@
           var pages = subjectExercisesOf(data, subject.id);
           var html = '';
           if (pages.length) {
-            html += '<h2 class="sub-title">' + svgIcon('sparkles') + ' تمارين خارج الدروس</h2>' +
-              '<div class="grid mini-grid">' + pages.map(sectionCard).join('') + '</div>';
+            html += '<h2 class="sub-title">' + svgIcon('pencil') + ' تمارين المادة</h2>' +
+              '<div class="grid mini-grid">' + pages.map(exerciseCard).join('') + '</div>';
           }
           units.forEach(function (u) {
             var exs = unitExercisesOf(data, u.id);
             if (!exs.length) return;
             html += '<h2 class="sub-title">' + svgIcon('layers') + ' ' + escapeHtml(u.title) + '</h2>' +
-              '<div class="grid mini-grid">' + exs.map(function (x) { return exerciseCard(x, ''); }).join('') + '</div>';
+              '<div class="grid mini-grid">' + exs.map(function (x) { return exerciseCardLegacy(x, u.title); }).join('') + '</div>';
           });
           if (!html) {
             html = '<div class="empty">' + svgIcon('pencil') + ' لا توجد تمارين في هذه المادة بعد</div>';

@@ -1831,15 +1831,19 @@ function renderExercisesPanel(p) {
   p.innerHTML =
     '<h2>' + svgIcon('pencil') + ' قسم التمارين (صفحة التمارين ثم النسخ إلى الدروس)</h2>' +
     '<p class="hint">أضف عناوين التمارين وحلولها المصوّرة أو ملفات الـ PDF والفيديو هنا بشكل ديناميكي (عنوان + صورة أو عدة صور، ثم عنوان جديد تحته...)، ثم اضغط <b>«نسخ / مزامنة إلى دروس الوحدة»</b> لتظهر تلقائياً في قسم التمارين داخل جميع دروس الوحدة.</p>' +
+    '<div class="note-box">' + svgIcon('info') + ' ملاحظة: داخل الوحدة في صفحة الطالب تظهر <b>الدروس فقط</b>. ' +
+      'أما <b>التمارين المستقلة</b> (لكل تمرين <b>موضوع</b> و<b>حل</b>) فتُدار من قسم ' +
+      '<b>«الأقسام والبكالوريات»</b> وتظهر في تبويب «التمارين» داخل صفحة المادة.</div>' +
 
     /* 1) اختيار المادة والوحدة + إنشاء تمرين جديد */
     '<div class="frm-card">' +
       '<div class="frm-row">' +
         '<select class="inp" id="exSubjSel">' + subjectOptions(sel.subject) + '</select>' +
         '<select class="inp" id="exUnitSel">' + unitOptions(sel.subject, sel.unit) + '</select>' +
-        (sel.unit
-          ? '<a class="btn" href="unit.html?unit=' + encodeURIComponent(sel.unit) + '&section=exercises" target="_blank">' + svgIcon('eye') + ' معاينة صفحة التمارين</a>'
+        (sel.subject
+          ? '<a class="btn" href="subject.html?subject=' + encodeURIComponent(sel.subject) + '&tab=exercises" target="_blank">' + svgIcon('eye') + ' معاينة تبويب التمارين</a>'
           : '') +
+        '<button type="button" class="btn btn-primary" id="gotoStandaloneEx">' + svgIcon('plus') + ' تمارين مستقلة (موضوع + حل)</button>' +
       '</div>' +
       '<div class="frm-row" style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border)">' +
         '<input class="inp" id="exNewTitle" placeholder="عنوان التمرين الجديد (مثال: تمرين 1-2-3 / سلسلة تمارين 1 / بكالوريا 2025)">' +
@@ -1900,6 +1904,11 @@ function renderExercisesPanel(p) {
 
     /* 3) مساحة رفع وإضافة العناوين الديناميكية والصور والـ PDF والفيديو للتمرين المحدد */
     '<div id="exResWrap"></div>';
+
+  var gotoStandalone = $('#gotoStandaloneEx');
+  if (gotoStandalone) {
+    gotoStandalone.addEventListener('click', function () { sel.section = ''; goToAdminTab('sections'); });
+  }
 
   $('#exSubjSel').addEventListener('change', function () {
     sel.subject = this.value;
@@ -2188,15 +2197,20 @@ function openSectionDialog(opts) {
         s.kind = v.kind || s.kind;
         var siblings = s.parentId ? sectionChildrenOf(data, s.parentId) : rootSectionsOf(data, s.subjectId);
         setItemOrder(siblings, s.id, v.order);
+        /* إن أصبح القسم تمريناً أو سنة بكالوريا نجهّز له جزأي «الموضوع» و«الحل» */
+        if (sectionNeedsParts(data, s)) { ensureSectionParts(data, s); adminOpenSectionNodes[s.id] = true; }
       } else {
         var id = uid('sec');
-        data.sections.push({
+        ensureSectionsArray(data).push({
           id: id, subjectId: opts.subjectId, parentId: opts.parentId || '',
           title: title, icon: String(v.icon || '').trim() || 'file',
           kind: v.kind || 'folder', hidden: false, order: 1
         });
         var siblings2 = opts.parentId ? sectionChildrenOf(data, opts.parentId) : rootSectionsOf(data, opts.subjectId);
         setItemOrder(siblings2, id, v.order);
+        var created = getSection(data, id);
+        /* التمرين المستقل وسنة البكالوريا: جزآن جاهزان «الموضوع» و«الحل» */
+        if (created && sectionNeedsParts(data, created)) ensureSectionParts(data, created);
         adminOpenSectionNodes[id] = true;
       }
       save();
@@ -2243,21 +2257,33 @@ function autoAddBakYears(parentId) {
     adminOpenSectionNodes[id] = true;
     added++;
   });
-  if (!added) { toast('السنوات موجودة مسبقاً', 'info'); return; }
+  /* كل سنة تُجهَّز تلقائياً بجزأي «الموضوع» و«الحل» */
+  var partsAdded = 0;
+  sectionChildrenOf(data, parentId).forEach(function (c) {
+    var beforeCount = data.sections.length;
+    ensureSectionParts(data, c);
+    partsAdded += (data.sections.length - beforeCount);
+  });
+
+  if (!added && !partsAdded) { toast('السنوات موجودة مسبقاً', 'info'); return; }
   adminOpenSectionNodes[parentId] = true;
   save();
   renderPanel();
-  toast('تمت إضافة ' + added + ' سنوات تحت «' + parent.title + '»');
+  toast('تمت إضافة ' + added + ' سنوات تحت «' + parent.title + '»' +
+    (partsAdded ? ' مع تجهيز الموضوع والحل لكل سنة' : ''));
 }
 
 /* نسخ قسم مع كل أقسامه الفرعية وموارده داخل مادة (أو تحت أبٍ جديد) */
 function duplicateSectionTree(section, targetSubjectId, targetParentId) {
   var newId = uid('sec');
-  ensureSectionsArray(data).push({
+  var copySec = {
     id: newId, subjectId: targetSubjectId, parentId: targetParentId || '',
     title: section.title, icon: section.icon || 'file', kind: section.kind || 'page',
     hidden: !!section.hidden, order: section.order || 1
-  });
+  };
+  if (section.part) copySec.part = section.part;
+  if (section.parts) copySec.parts = true;
+  ensureSectionsArray(data).push(copySec);
   var kids = sectionChildrenOf(data, section.id);
   kids.forEach(function (k) { duplicateSectionTree(k, targetSubjectId, newId); });
   resourcesOf(data, section.id, null, true).forEach(function (r) {
@@ -2276,6 +2302,9 @@ function sectionNodeHTML(s, depth) {
   var resCount = resourcesOf(data, s.id).length;
   var isOpen = !!adminOpenSectionNodes[s.id];
   var kindMeta = SECTION_KINDS[s.kind] || SECTION_KINDS.page;
+  var partBadge = (s.part && PART_META[s.part])
+    ? '<span class="part-tag part-tag-' + s.part + '">' + svgIcon(PART_META[s.part].icon) + ' ' + PART_META[s.part].label + '</span>'
+    : '';
   var extra =
     '<button class="icon-btn" data-act="add-child" data-id="' + s.id + '" title="إضافة قسم فرعي داخله">' + svgIcon('plus') + '</button>' +
     '<button class="icon-btn" data-act="manage-content" data-id="' + s.id + '" title="إدارة محتوى هذا القسم">' + svgIcon('file') + '</button>' +
@@ -2289,10 +2318,12 @@ function sectionNodeHTML(s, depth) {
         : '<span class="sec-node-spacer"></span>') +
       '<span class="sec-node-ico">' + iconHTML(s.icon, kindMeta.icon) + '</span>' +
       '<span class="sec-node-main">' +
-        '<span class="sec-node-title">' + escapeHtml(s.title) + hiddenPillHTML(s.hidden) + '</span>' +
+        '<span class="sec-node-title">' + escapeHtml(s.title) + partBadge + hiddenPillHTML(s.hidden) + '</span>' +
         '<span class="sec-node-meta">' + svgIcon(kindMeta.icon) + ' ' + kindMeta.label +
           (kids.length ? ' · ' + kids.length + ' أقسام فرعية' : '') +
-          ' · ' + resCount + ' عنصر محتوى</span>' +
+          ' · ' + resCount + ' عنصر محتوى' +
+          (s.part ? '' : (sectionHasContent(data, s.id) ? ' · ' + svgIcon('check') : ' · لا محتوى بعد')) +
+        '</span>' +
       '</span>' +
       actsHTML(s.id, extra) +
     '</div>' +
@@ -2310,6 +2341,16 @@ function renderSectionsPanel(p) {
   var subject = getSubject(data, sel.subject);
   var roots = subject ? rootSectionsOf(data, subject.id) : [];
 
+  /* تجهيز «الموضوع» و«الحل» تلقائياً للتمارين المستقلة وسنوات البكالوريا الموجودة مسبقاً */
+  var beforeParts = ensureSectionsArray(data).length;
+  roots.forEach(function (s) {
+    if (sectionNeedsParts(data, s)) { ensureSectionParts(data, s); adminOpenSectionNodes[s.id] = true; }
+    sectionChildrenOf(data, s.id).forEach(function (c) {
+      if (sectionNeedsParts(data, c)) { ensureSectionParts(data, c); adminOpenSectionNodes[c.id] = true; }
+    });
+  });
+  if (ensureSectionsArray(data).length !== beforeParts) save();
+
   p.innerHTML =
     '<h2>' + svgIcon('cap') + ' الأقسام والبكالوريات</h2>' +
     '<p class="hint">أنشئ صفحات ديناميكية داخل كل مادة: تبويب مثل <b>بكالوريات</b> ← سنوات (2026، 2025…) ← مواضيع الامتحان والحلول. ' +
@@ -2319,9 +2360,12 @@ function renderSectionsPanel(p) {
       '<div class="frm-row">' +
         '<select class="inp" id="secSubject">' + subjectOptions(sel.subject) + '</select>' +
         '<button type="button" class="btn btn-primary" id="addRootSection">' + svgIcon('plus') + ' إضافة قسم رئيسي</button>' +
-        '<button type="button" class="btn" id="addBakYears">' + svgIcon('calendar') + ' إضافة السنوات تلقائياً</button>' +
+        '<button type="button" class="btn" id="addExerciseBtn">' + svgIcon('pencil') + ' إضافة تمرين (موضوع + حل)</button>' +
+        '<button type="button" class="btn" id="addBakYearBtn">' + svgIcon('calendar') + ' إضافة سنة بكالوريا</button>' +
+        '<button type="button" class="btn" id="addBakYears">' + svgIcon('refresh') + ' توليد السنوات تلقائياً</button>' +
       '</div>' +
-      '<p class="hint" style="margin:10px 0 0">كل مادة تحتوي افتراضياً على تبويب <b>بكالوريات</b> — أضف تحته السنوات، وداخل كل سنة مواضيع الامتحان أو الحلول.</p>' +
+      '<p class="hint" style="margin:10px 0 0">كل <b>تمرين</b> وكل <b>سنة بكالوريا</b> يُجهَّز تلقائياً بجزأين: <b>الموضوع</b> و<b>الحل</b>. ' +
+      'إن تركت الحل فارغاً يظهر للطالب بلون خافت مع رسالة «لم يضاف الحل بعد».</p>' +
     '</div>' +
 
     '<div class="sec-tree" id="secTree">' +
@@ -2341,6 +2385,64 @@ function renderSectionsPanel(p) {
   $('#addRootSection').addEventListener('click', function () {
     if (!sel.subject) { toast('اختر مادة أولاً', 'err'); return; }
     openSectionDialog({ subjectId: sel.subject, parentId: '', kind: 'tab' });
+  });
+
+  $('#addExerciseBtn').addEventListener('click', function () {
+    if (!sel.subject) { toast('اختر مادة أولاً', 'err'); return; }
+    var exCount = subjectExercisesOf(data, sel.subject).length;
+    var nextNum = String(exCount + 1).padStart(2, '0');
+    openEditDialog({
+      title: 'إضافة تمرين مستقل (خارج الوحدات)', icon: 'pencil',
+      fields: [
+        { key: 'title', label: 'عنوان التمرين', placeholder: 'مثال: تمرين ' + nextNum, value: 'تمرين ' + nextNum },
+        { key: 'icon', label: 'الأيقونة (اسم SVG أو رابط صورة)', type: 'icon', value: 'pencil', placeholder: 'مثال: pencil' },
+        { key: 'order', label: 'موضعه في الترتيب', type: 'number', value: exCount + 1 }
+      ],
+      onSave: function (v) {
+        var title = String(v.title || '').trim();
+        if (!title) { toast('اكتب عنوان التمرين', 'err'); return; }
+        var id = uid('sec');
+        ensureSectionsArray(data).push({
+          id: id, subjectId: sel.subject, parentId: '', title: title,
+          icon: String(v.icon || '').trim() || 'pencil', kind: 'exercise', hidden: false, order: 1
+        });
+        setItemOrder(subjectExercisesOf(data, sel.subject), id, v.order);
+        var created = getSection(data, id);
+        ensureSectionParts(data, created); /* الموضوع + الحل جاهزان */
+        adminOpenSectionNodes[id] = true;
+        save(); renderPanel();
+        toast('تمت إضافة التمرين مع جزأي «الموضوع» و«الحل»');
+      }
+    });
+  });
+
+  $('#addBakYearBtn').addEventListener('click', function () {
+    if (!sel.subject) { toast('اختر مادة أولاً', 'err'); return; }
+    var bak = getSection(data, bakSectionId(sel.subject));
+    if (!bak) { toast('لا يوجد تبويب «بكالوريات» في هذه المادة', 'err'); return; }
+    var thisYear = String(new Date().getFullYear());
+    openEditDialog({
+      title: 'إضافة سنة بكالوريا', icon: 'calendar',
+      fields: [
+        { key: 'title', label: 'السنة', placeholder: 'مثال: ' + thisYear, value: thisYear },
+        { key: 'order', label: 'موضعها في الترتيب', type: 'number', value: sectionChildrenOf(data, bak.id).length + 1 }
+      ],
+      onSave: function (v) {
+        var title = String(v.title || '').trim();
+        if (!title) { toast('اكتب السنة', 'err'); return; }
+        var id = uid('sec');
+        ensureSectionsArray(data).push({
+          id: id, subjectId: sel.subject, parentId: bak.id, title: title,
+          icon: 'calendar', kind: 'folder', hidden: false, order: 1
+        });
+        setItemOrder(sectionChildrenOf(data, bak.id), id, v.order);
+        ensureSectionParts(data, getSection(data, id)); /* الموضوع + الحل */
+        adminOpenSectionNodes[bak.id] = true;
+        adminOpenSectionNodes[id] = true;
+        save(); renderPanel();
+        toast('تمت إضافة سنة ' + title + ' مع جزأي «الموضوع» و«الحل»');
+      }
+    });
   });
 
   $('#addBakYears').addEventListener('click', function () {
