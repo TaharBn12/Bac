@@ -2364,3 +2364,72 @@ details[open] > summary .acc-chevron,
   .sub-tab { justify-content: center; }
   .sec-card-lg { padding: 14px; gap: 10px; }
 }
+
+/* ============================================================
+   جزءا التمرين وسنة البكالوريا: «الموضوع» و«الحل»
+   ============================================================ */
+.part-cards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px; margin-top: 14px;
+}
+.part-card {
+  display: flex; align-items: center; gap: 14px;
+  padding: 20px; border-radius: 20px; position: relative; overflow: hidden;
+  background: var(--card); border: 1px solid var(--border); transition: 0.2s;
+}
+.part-card::before {
+  content: ''; position: absolute; inset-block: 0; inset-inline-start: 0; width: 5px;
+  background: var(--sc, linear-gradient(135deg, var(--accent-2), var(--accent)));
+}
+.part-card:hover { transform: translateY(-4px); background: var(--card-hover); box-shadow: var(--shadow); }
+.part-card .pc-ico {
+  width: 52px; height: 52px; flex: 0 0 auto; border-radius: 16px;
+  display: grid; place-items: center;
+  background: var(--sc, linear-gradient(135deg, var(--accent-2), var(--accent)));
+  color: #14102e;
+}
+.part-card .pc-ico .ic { width: 24px; height: 24px; }
+.part-card .pc-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.part-card .pc-title { font-size: 18px; font-weight: 900; }
+.part-card .pc-sub { font-size: 12.5px; color: var(--muted); }
+.part-card .pc-go { opacity: 0.5; font-size: 22px; }
+.part-card .pc-go .ic { width: 20px; height: 20px; }
+
+/* الجزء غير المضاف بعد (مثلاً الحل) → بلون خافت */
+.part-card.is-empty { opacity: 0.62; border-style: dashed; cursor: not-allowed; }
+.part-card.is-empty:hover { transform: none; box-shadow: none; background: var(--card); }
+.part-card.is-empty .pc-ico {
+  background: rgba(255, 255, 255, 0.08); color: var(--muted);
+  border: 1px dashed rgba(255, 255, 255, 0.25);
+}
+.part-card.is-empty .pc-title { color: var(--muted); }
+.part-card.is-empty .pc-sub { color: var(--muted); }
+.part-card.part-solution.is-empty .pc-ico { color: #ffc75d; border-color: rgba(245, 197, 66, 0.35); }
+
+/* شارة الجزء في بطاقة التمرين بصفحة المادة */
+.badge.part-badge.off {
+  color: var(--muted); opacity: 0.75; border-style: dashed;
+}
+.badge.part-badge.on { color: var(--ok); border-color: rgba(61, 220, 151, 0.35); }
+
+/* شارات الأدمن */
+.part-tag {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; font-weight: 800; padding: 2px 9px; border-radius: 999px;
+  background: rgba(124, 92, 255, 0.16); color: #ded7ff;
+  border: 1px solid rgba(124, 92, 255, 0.35);
+}
+.part-tag .ic { width: 12px; height: 12px; }
+.part-tag-solution { background: rgba(16, 185, 129, 0.14); color: #6ee7b7; border-color: rgba(16, 185, 129, 0.4); }
+.part-of-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12.5px; font-weight: 800; padding: 3px 12px; border-radius: 999px;
+  background: rgba(255, 255, 255, 0.07); border: 1px solid var(--border); color: var(--text);
+}
+.part-of-badge .ic { width: 14px; height: 14px; }
+.part-of-badge .icon-img { width: 16px; height: 16px; border-radius: 5px; }
+
+@media (max-width: 560px) {
+  .part-cards { grid-template-columns: 1fr; }
+  .part-card { padding: 16px; }
+}

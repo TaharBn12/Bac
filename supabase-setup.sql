@@ -90,9 +90,13 @@ create table if not exists public.aya_sections (
   title      text not null,
   icon       text not null default 'file',
   kind       text not null default 'page',   -- tab | topic | exercise | folder | page
+  part       text,                           -- topic | solution (جزأي التمرين أو سنة البكالوريا)
   is_hidden  boolean not null default false,
   sort_order int  not null default 0
 );
+
+-- ترقية آمنة لقاعدة قديمة: إضافة عمود الجزء (الموضوع / الحل)
+alter table public.aya_sections add column if not exists part text;
 
 create index if not exists aya_sections_subject_idx on public.aya_sections (subject_id, parent_id, sort_order);
 

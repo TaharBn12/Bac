@@ -336,6 +336,69 @@ function sectionChildrenCount(data, sectionId) {
   return sectionChildrenOf(data, sectionId).length;
 }
 
+/* ============================================================
+   جزءا التمرين وسنة البكالوريا: «الموضوع» و«الحل»
+   ============================================================ */
+var PART_META = {
+  topic:    { icon: 'file',  label: 'الموضوع', empty: 'لم يضاف الموضوع بعد' },
+  solution: { icon: 'check', label: 'الحل',    empty: 'لم يضاف الحل بعد' }
+};
+
+/* هل هذا القسم يقسَّم إلى جزأين (تمرين مستقل خارج الوحدات، أو سنة بكالوريا)؟ */
+function sectionNeedsParts(data, s) {
+  if (!s || s.part) return false;
+  if (s.kind === 'exercise') return true;
+  if (s.parts) return true;
+  var parent = s.parentId ? getSection(data, s.parentId) : null;
+  /* أي مجلد مباشرة تحت تبويب رئيسي (مثل «بكالوريات») يُعتبر سنة */
+  if (parent && parent.kind === 'tab' && s.kind === 'folder') return true;
+  return false;
+}
+
+/* قراءة جزأي القسم إن وُجدا — دون إنشائهما */
+function sectionPartsOf(data, sectionId) {
+  var kids = sectionChildrenOf(data, sectionId);
+  return {
+    topic: kids.filter(function (k) { return k.part === 'topic'; })[0] || null,
+    solution: kids.filter(function (k) { return k.part === 'solution'; })[0] || null
+  };
+}
+
+/* إنشاء جزأي «الموضوع» و«الحل» داخل القسم إن لم يوجد بعد */
+function ensureSectionParts(data, s) {
+  if (!s) return { topic: null, solution: null };
+  if (!sectionNeedsParts(data, s)) return sectionPartsOf(data, s.id);
+  var kids = sectionChildrenOf(data, s.id);
+  var topic = kids.filter(function (k) { return k.part === 'topic'; })[0] || null;
+  var solution = kids.filter(function (k) { return k.part === 'solution'; })[0] || null;
+  var maxOrder = kids.reduce(function (m, k) { return Math.max(m, k.order || 0); }, 0);
+  if (!topic) {
+    topic = {
+      id: uid('sec'), subjectId: s.subjectId, parentId: s.id, title: 'الموضوع',
+      icon: 'file', kind: 'page', part: 'topic', hidden: false, order: maxOrder + 1
+    };
+    ensureSectionsArray(data).push(topic);
+    maxOrder++;
+  }
+  if (!solution) {
+    solution = {
+      id: uid('sec'), subjectId: s.subjectId, parentId: s.id, title: 'الحل',
+      icon: 'check', kind: 'page', part: 'solution', hidden: false, order: maxOrder + 1
+    };
+    ensureSectionsArray(data).push(solution);
+  }
+  return { topic: topic, solution: solution };
+}
+
+/* هل يوجد محتوى داخل القسم أو داخل أحد أبنائه؟ */
+function sectionHasContent(data, sectionId, depth) {
+  if (resourcesOf(data, sectionId).length) return true;
+  if ((depth || 0) > 4) return false;
+  return sectionChildrenOf(data, sectionId).some(function (c) {
+    return sectionHasContent(data, c.id, (depth || 0) + 1);
+  });
+}
+
 /* حقول الحاوية عند إنشاء مورد جديد: درس/تمرين أم قسم ديناميكي */
 function containerFields(data, containerId) {
   return isSectionNode(data, containerId) ? { sectionId: containerId } : { lessonId: containerId };

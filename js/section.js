@@ -18,11 +18,21 @@ function initSectionPage() {
   var colorClass = subject.color ? 'c-' + subject.color : '';
   var chain = (path && path.sections) || [section];
 
-  document.title = 'آية باك 2027 — ' + section.title;
+  /* التمرين المستقل وسنة البكالوريا يُقسَّمان تلقائياً إلى «الموضوع» و«الحل» */
+  var parentSection = chain.length > 1 ? chain[chain.length - 2] : null;
+  var hasParts = sectionNeedsParts(data, section);
+  var parts = hasParts ? ensureSectionParts(data, section) : null;
+
+  document.title = 'آية باك 2027 — ' + section.title +
+    (parentSection ? ' — ' + parentSection.title : '');
 
   /* ---------- مسار التنقل ---------- */
   var crumbs = [{ label: 'الرئيسية', href: 'home.html', icon: 'home' }];
   if (subject.id) crumbs.push({ label: subject.name, href: 'subject.html?subject=' + encodeURIComponent(subject.id) });
+  /* التمرين المستقل يندرج تحت تبويب «التمارين» في صفحة المادة */
+  if (chain[0] && chain[0].kind === 'exercise' && subject.id) {
+    crumbs.push({ label: 'التمارين', href: 'subject.html?subject=' + encodeURIComponent(subject.id) + '&tab=exercises' });
+  }
   chain.forEach(function (s, i) {
     if (i === chain.length - 1) crumbs.push({ label: s.title });
     else crumbs.push({ label: s.title, href: 'section.html?section=' + encodeURIComponent(s.id) });
@@ -41,10 +51,14 @@ function initSectionPage() {
         '<div class="subj-hero-body">' +
           '<div class="subj-hero-title-row">' +
             '<h1>' + escapeHtml(section.title) + '</h1>' +
+            (parentSection ? '<span class="part-of-badge">' + iconHTML(parentSection.icon, 'layers') + ' ' + escapeHtml(parentSection.title) + '</span>' : '') +
             (subject.name ? '<span class="subj-coeff-badge">' + escapeHtml(subject.name) + '</span>' : '') +
           '</div>' +
           '<div class="meta">' + svgIcon('layers') + ' ' +
-            (kids.length ? kids.length + ' أقسام فرعية · ' : '') + resCount + ' عنصر محتوى</div>' +
+            (parts
+              ? 'جزأين: الموضوع والحل'
+              : (kids.length ? kids.length + ' أقسام فرعية · ' : '') + resCount + ' عنصر محتوى') +
+          '</div>' +
           '<div class="sec-head-acts">' +
             '<button type="button" class="btn-complete-item' + (isItemCompleted(section.id) ? ' is-completed' : '') + '" id="secCompleteBtn">' +
               svgIcon(isItemCompleted(section.id) ? 'check-circle' : 'check') +
@@ -68,10 +82,44 @@ function initSectionPage() {
   }
   renderHead();
 
-  /* ---------- الأقسام الفرعية (مثال: سنوات البكالوريا) ---------- */
+  /* ---------- الأقسام الفرعية ---------- */
   var childrenEl = $('#childrenSection');
-  if (kids.length) {
+
+  /* حالة خاصة: التمرين / سنة البكالوريا → بطاقتان: «الموضوع» و«الحل» */
+  if (parts) {
+    $('#childrenTitle').textContent = escapeHtml(section.title) + ' — اختر الموضوع أو الحل';
+    $('#childrenGrid').className = 'part-cards';
+    $('#childrenGrid').innerHTML = ['topic', 'solution'].map(function (kind) {
+      var part = parts[kind];
+      var meta = PART_META[kind];
+      var has = part ? sectionHasContent(data, part.id) : false;
+      var count = part ? resourcesOf(data, part.id).length : 0;
+      var subKids = part ? sectionChildrenOf(data, part.id).length : 0;
+      return '<a class="part-card part-' + kind + (has ? '' : ' is-empty') + ' ' + colorClass + '" ' +
+          'href="' + (has && part ? 'section.html?section=' + encodeURIComponent(part.id) : '#') + '"' +
+          (has ? '' : ' data-empty-part="' + kind + '"') + '>' +
+        '<span class="pc-ico">' + svgIcon(meta.icon) + '</span>' +
+        '<span class="pc-body">' +
+          '<span class="pc-title">' + meta.label + '</span>' +
+          '<span class="pc-sub">' + (has
+            ? (count ? count + ' عنصر محتوى' : (subKids ? subKids + ' أقسام فرعية' : 'متوفر'))
+            : 'لم يضاف بعد') + '</span>' +
+        '</span>' +
+        '<span class="pc-go">' + (has ? '‹' : svgIcon('clock')) + '</span>' +
+      '</a>';
+    }).join('');
+
+    /* الضغط على جزء فارغ → رسالة تنبيه (توست) بدل فتح صفحة فارغة */
+    $all('[data-empty-part]', $('#childrenGrid')).forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.preventDefault();
+        var kind = el.dataset.emptyPart;
+        toast((PART_META[kind] || PART_META.solution).empty, 'info');
+      });
+    });
+  } else if (kids.length) {
     $('#childrenTitle').textContent = 'استعرض حسب ' + section.title;
+    $('#childrenGrid').className = 'grid sec-children';
     $('#childrenGrid').innerHTML = kids.map(function (c, i) {
       var subKids = sectionChildrenOf(data, c.id).length;
       var subRes = resourcesOf(data, c.id).length;
@@ -248,7 +296,7 @@ function initSectionPage() {
     $('#exSection').style.display = 'none';
   }
 
-  if (!videos.length && !pdfs.length && !images.length && !exs.length && !kids.length) {
+  if (!videos.length && !pdfs.length && !images.length && !exs.length && !kids.length && !parts) {
     $('#emptyAll').hidden = false;
   }
 
