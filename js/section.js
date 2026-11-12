@@ -102,8 +102,9 @@ function initSectionPage() {
         '<span class="pc-body">' +
           '<span class="pc-title">' + meta.label + '</span>' +
           '<span class="pc-sub">' + (has
-            ? (count ? count + ' عنصر محتوى' : (subKids ? subKids + ' أقسام فرعية' : 'متوفر'))
-            : 'لم يضاف بعد') + '</span>' +
+            ? (count ? svgIcon('file') + ' <b>' + count + '</b>'
+                     : (subKids ? svgIcon('layers') + ' <b>' + subKids + '</b>' : svgIcon('check')))
+            : svgIcon('clock') + ' <span>لم يضاف بعد</span>') + '</span>' +
         '</span>' +
         '<span class="pc-go">' + (has ? '‹' : svgIcon('clock')) + '</span>' +
       '</a>';
@@ -130,9 +131,9 @@ function initSectionPage() {
         '<span class="sec-body">' +
           '<span class="sec-title">' + escapeHtml(c.title) + '</span>' +
           '<span class="badges">' +
-            (subKids ? '<span class="badge on">' + svgIcon('layers') + ' ' + subKids + ' أقسام</span>' : '') +
-            (subRes ? '<span class="badge on">' + svgIcon('file') + ' ' + subRes + ' عنصر</span>' : '') +
-            (!subKids && !subRes ? '<span class="badge">لا محتوى بعد</span>' : '') +
+            countChip('layers', subKids, 'قسم فرعي') +
+            countChip('file', subRes, 'عنصر محتوى') +
+            (!subKids && !subRes ? emptyChip('لا محتوى بعد') : '') +
           '</span>' +
         '</span>' +
         '<span class="sec-arrow">‹</span>' +

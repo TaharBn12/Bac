@@ -69,6 +69,26 @@ function hydrateIcons(root) {
   });
 }
 
+/* شريحة مختصرة: أيقونة معبّرة + رقم.
+   بدل العبارات الطويلة («٦ أقسام فرعية»، «١٢ عنصر محتوى») التي تزدحم
+   وتلتصق ببعضها على الهاتف. العنوان الكامل يبقى في title/aria-label. */
+function countChip(iconName, n, label, on) {
+  n = parseInt(n, 10) || 0;
+  if (n <= 0) return '';
+  var full = n + ' ' + (label || '');
+  return '<span class="cnt-chip' + (on === false ? '' : ' on') + '"' +
+    ' title="' + escapeHtml(full) + '" aria-label="' + escapeHtml(full) + '">' +
+    svgIcon(iconName) + '<b>' + n + '</b></span>';
+}
+
+/* شريحة حالة فارغة (لا محتوى بعد) — أيقونة صغيرة فقط */
+function emptyChip(label, iconName) {
+  return '<span class="cnt-chip is-empty"' +
+    ' title="' + escapeHtml(label || 'لا محتوى بعد') + '"' +
+    ' aria-label="' + escapeHtml(label || 'لا محتوى بعد') + '">' +
+    svgIcon(iconName || 'clock') + '</span>';
+}
+
 function fmtSize(bytes) {
   if (bytes == null) return '';
   if (bytes === 0) return '0 بايت';
