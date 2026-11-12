@@ -275,7 +275,7 @@ button { font-family: inherit; }
 .row-card .m { font-size: 13px; color: var(--muted); margin-top: 2px; }
 .row-card .arrow { opacity: 0.5; font-size: 20px; }
 
-.badges { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+.badges { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 6px; }
 .badge {
   font-size: 11.5px; font-weight: 700; padding: 2px 9px; border-radius: 999px;
   background: rgba(255, 255, 255, 0.07); border: 1px solid var(--border); color: var(--muted);
@@ -2163,6 +2163,13 @@ details[open] > summary .acc-chevron,
 .mini-card .mc-done { color: var(--ok); }
 .mini-card .mc-done .ic { width: 20px; height: 20px; }
 .mini-card.is-done { border-color: rgba(61, 220, 151, 0.4); box-shadow: inset 0 0 0 1px rgba(61, 220, 151, 0.12); }
+
+/* أيقونة البطاقة أصغر: يترك مساحة أوسع للعنوان، خصوصاً على الهاتف */
+.mini-card .mc-ico { width: 34px; height: 34px; border-radius: 11px; }
+.mini-card .mc-ico .ic { width: 17px; height: 17px; }
+.mini-card .mc-done .ic { width: 17px; height: 17px; }
+.mini-card { padding: 14px; }
+.mini-card .mc-title { font-size: 14.5px; }
 .mini-card.ex .mc-ico { background: linear-gradient(135deg, #f97316, var(--accent)); }
 
 /* ---------- 5) بطاقات الأقسام (بكالوريات، سنوات، صفحات) ---------- */
@@ -2192,7 +2199,15 @@ details[open] > summary .acc-chevron,
   display: grid; place-items: center; font-size: 13.5px; font-weight: 900;
   background: rgba(255, 255, 255, 0.08); border: 1px solid var(--border); color: var(--muted);
 }
-.sec-card-lg { padding: 18px 20px; }
+/* أيقونة القسم أصغر + فراغات أضيق (بطاقات التمارين والبكالوريات) */
+.sec-card { gap: 11px; padding: 14px 15px; }
+.sec-card .sec-ico { width: 36px; height: 36px; border-radius: 12px; font-size: 18px; }
+.sec-card .sec-ico .ic { width: 18px; height: 18px; }
+.sec-card .sec-ico .icon-img { border-radius: 12px; }
+.sec-card .sec-num { width: 26px; height: 26px; border-radius: 9px; font-size: 12.5px; }
+.sec-card .sec-title { font-size: 15px; }
+.sec-card .sec-arrow { font-size: 18px; }
+.sec-card-lg { padding: 15px 16px; }
 .sec-card.is-done { border-color: rgba(61, 220, 151, 0.4); }
 .sec-children { margin-top: 14px; }
 .section-hero .sec-head-acts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
@@ -2389,7 +2404,7 @@ details[open] > summary .acc-chevron,
   .sub-tabs-inner { padding: 4px; border-radius: 16px; }
   .sub-tab { padding: 10px 12px; font-size: 13px; gap: 6px; }
   .sub-tab em { padding: 1px 6px; font-size: 11px; }
-  .sec-card-lg { padding: 14px; gap: 10px; }
+
 }
 
 /* ============================================================
@@ -2421,6 +2436,17 @@ details[open] > summary .acc-chevron,
 .part-card .pc-sub { font-size: 12.5px; color: var(--muted); }
 .part-card .pc-go { opacity: 0.5; font-size: 22px; }
 .part-card .pc-go .ic { width: 20px; height: 20px; }
+
+/* بطاقة الجزء: أيقونة أصغر وسطر حالة مختصر (أيقونة + عدد) */
+.part-card { gap: 12px; padding: 16px; }
+.part-card .pc-ico { width: 42px; height: 42px; border-radius: 14px; }
+.part-card .pc-ico .ic { width: 20px; height: 20px; }
+.part-card .pc-title { font-size: 17px; }
+.part-card .pc-go { font-size: 19px; }
+.part-card .pc-go .ic { width: 18px; height: 18px; }
+.part-card .pc-sub { display: inline-flex; align-items: center; gap: 5px; }
+.part-card .pc-sub .ic { width: 13px; height: 13px; }
+.part-card .pc-sub b { color: var(--text); font-weight: 900; }
 
 /* الجزء غير المضاف بعد (مثلاً الحل) → بلون خافت */
 .part-card.is-empty { opacity: 0.62; border-style: dashed; cursor: not-allowed; }
@@ -2522,4 +2548,68 @@ details[open] > summary .acc-chevron,
   border: 1px dashed var(--border-soft);
   background: rgba(255, 255, 255, 0.014);
   border-radius: var(--radius);
+}
+
+/* ============================================================
+   شريحة العدّ المختصرة: أيقونة معبّرة + رقم
+   بدل العبارات الطويلة («٦ أقسام فرعية»، «١٢ عنصر محتوى»)
+   التي تزدحم وتلتصق ببعضها على الهاتف.
+   المعنى الكامل محفوظ في title/aria-label عند اللمس المطوّل.
+   ============================================================ */
+.cnt-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; border-radius: 999px; white-space: nowrap;
+  font-size: 12px; font-weight: 800; line-height: 1.6;
+  background: rgba(255, 255, 255, 0.055);
+  border: 1px solid var(--border-soft);
+  color: var(--muted);
+}
+.cnt-chip .ic { width: 13px; height: 13px; flex: 0 0 auto; }
+.cnt-chip b { font-weight: 900; font-variant-numeric: tabular-nums; }
+.cnt-chip.on {
+  color: var(--accent);
+  background: rgba(245, 197, 66, 0.12);
+  border-color: rgba(245, 197, 66, 0.22);
+}
+.cnt-chip.is-empty { padding: 2px 6px; opacity: 0.55; }
+.cnt-chip.is-empty .ic { width: 12px; height: 12px; }
+
+/* ============================================================
+   الهاتف: إزالة الازدحام — أيقونات أصغر وفراغات أضيق
+   وُضع في نهاية الملف عمداً ليتغلّب على القواعد الأساسية
+   (مثل .part-card و .sec-card-lg) المضافة بعد بلوكات @media السابقة.
+   ============================================================ */
+@media (max-width: 560px) {
+  .grid { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 11px; }
+
+  .sec-card { gap: 9px; padding: 12px 13px; }
+  .sec-card .sec-ico { width: 32px; height: 32px; border-radius: 11px; }
+  .sec-card .sec-ico .ic { width: 16px; height: 16px; }
+  .sec-card .sec-num { width: 23px; height: 23px; border-radius: 8px; font-size: 11.5px; }
+  .sec-card .sec-title { font-size: 14px; }
+  .sec-card .sec-arrow { font-size: 16px; }
+  .sec-card-lg { padding: 13px 14px; gap: 10px; }
+
+  .mini-card { padding: 12px; gap: 7px; }
+  .mini-card .mc-ico { width: 30px; height: 30px; border-radius: 10px; }
+  .mini-card .mc-ico .ic { width: 15px; height: 15px; }
+  .mini-card .mc-done .ic { width: 15px; height: 15px; }
+  .mini-card .mc-title { font-size: 14px; }
+  .mini-card .mc-sub { font-size: 11.5px; }
+
+  .part-cards { grid-template-columns: 1fr; gap: 11px; }
+  .part-card { padding: 14px; gap: 11px; }
+  .part-card .pc-ico { width: 38px; height: 38px; border-radius: 12px; }
+  .part-card .pc-ico .ic { width: 18px; height: 18px; }
+  .part-card .pc-title { font-size: 16px; }
+  .part-card .pc-go { font-size: 17px; }
+
+  .row-card { gap: 12px; padding: 13px 14px; }
+  .row-card .num { width: 40px; height: 40px; border-radius: 12px; font-size: 17px; }
+  .row-card .t { font-size: 15.5px; }
+
+  .badges { gap: 5px; margin-top: 5px; }
+  .badge { font-size: 11px; padding: 2px 8px; }
+  .cnt-chip { padding: 2px 7px; font-size: 11.5px; gap: 3px; }
+  .cnt-chip .ic { width: 12px; height: 12px; }
 }

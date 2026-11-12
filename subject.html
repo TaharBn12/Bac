@@ -159,10 +159,10 @@
           var p = resourcesOf(data, lessonId, 'pdf').length;
           var i = resourcesOf(data, lessonId, 'image').length;
           var out = '';
-          if (v) out += '<span class="badge on">' + svgIcon('film') + ' ' + v + '</span>';
-          if (p) out += '<span class="badge on">' + svgIcon('file') + ' ' + p + '</span>';
-          if (i) out += '<span class="badge on">' + svgIcon('image') + ' ' + i + '</span>';
-          if (!out) out = '<span class="badge">' + (isEx ? 'لا محتوى بعد' : 'لا محتوى بعد') + '</span>';
+          if (v) out += countChip('film', v, 'فيديو');
+          if (p) out += countChip('file', p, 'ملف');
+          if (i) out += countChip('image', i, 'صورة');
+          if (!out) out = emptyChip(isEx ? 'لا يوجد محتوى للتمرين بعد' : 'لا يوجد محتوى للدرس بعد');
           return '<div class="badges">' + out + '</div>';
         }
 
@@ -202,9 +202,9 @@
             '<span class="sec-body">' +
               '<span class="sec-title">' + escapeHtml(s.title) + '</span>' +
               '<span class="badges">' +
-                (kids ? '<span class="badge on">' + svgIcon('layers') + ' ' + kids + ' أقسام فرعية</span>' : '') +
-                (res ? '<span class="badge on">' + svgIcon('file') + ' ' + res + ' عنصر</span>' : '') +
-                (!kids && !res ? '<span class="badge">لا محتوى بعد</span>' : '') +
+                countChip('layers', kids, 'قسم فرعي') +
+                countChip('file', res, 'عنصر محتوى') +
+                (!kids && !res ? emptyChip('لا محتوى بعد') : '') +
               '</span>' +
             '</span>' +
             '<span class="sec-arrow">‹</span>' +
@@ -221,9 +221,12 @@
             '<span class="sec-body">' +
               '<span class="sec-title">' + escapeHtml(s.title) + '</span>' +
               '<span class="badges">' +
-                '<span class="badge part-badge' + (hasTopic ? ' on' : ' off') + '">' + svgIcon('file') + ' الموضوع</span>' +
-                '<span class="badge part-badge' + (hasSol ? ' on' : ' off') + '">' + svgIcon('check') + ' الحل' +
-                  (hasSol ? '' : ' — قريباً') + '</span>' +
+                '<span class="badge part-badge' + (hasTopic ? ' on' : ' off') + '"' +
+                  (hasTopic ? '' : ' title="الموضوع غير مضاف بعد"') + '>' +
+                  svgIcon(hasTopic ? 'file' : 'clock') + ' الموضوع</span>' +
+                '<span class="badge part-badge' + (hasSol ? ' on' : ' off') + '"' +
+                  (hasSol ? '' : ' title="الحل غير مضاف بعد — قريباً"') + '>' +
+                  svgIcon(hasSol ? 'check' : 'clock') + ' الحل</span>' +
               '</span>' +
             '</span>' +
             '<span class="sec-arrow">‹</span>' +
@@ -244,9 +247,9 @@
               '<div class="num">' + (i + 1) + '</div>' +
               '<div class="info"><div class="t">' + escapeHtml(u.title) + '</div>' +
               '<div class="badges">' +
-                '<span class="badge' + (ls.length ? ' on' : '') + '">' + svgIcon('film') + ' ' + ls.length + ' دروس</span>' +
-                '<span class="badge' + (exs.length ? ' on' : '') + '">' + svgIcon('pencil') + ' ' + exs.length + ' تمارين</span>' +
-                (doneCount2 ? '<span class="badge done-badge">' + svgIcon('check-circle') + ' مكتمل ' + doneCount2 + '/' + totalCount + '</span>' : '') +
+                countChip('film', ls.length, 'درس') +
+                countChip('pencil', exs.length, 'تمرين') +
+                (doneCount2 ? countChip('check-circle', doneCount2, 'مكتمل من ' + totalCount) : '') +
               '</div></div>' +
               '<div class="arrow">‹</div>' +
             '</a>';
