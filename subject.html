@@ -103,35 +103,48 @@
             '</div>' +
           '</div>';
 
-        /* ---------- شريط التبويبات ---------- */
-        function tabBtn(id, label, icon) {
-          return '<button type="button" class="sub-tab' + (active === id ? ' active' : '') + '" data-tab="' + id + '">' +
-            svgIcon(icon) + '<span>' + label + '</span></button>';
+        /* ---------- شريط التبويبات الموحّد ----------
+           الدروس · التمارين · المواضيع · البكالوريات (وكل تبويب يضيفه الأدمن) في شريط واحد */
+        function tabBtn(id, label, icon, count) {
+          return '<button type="button" class="sub-tab' + (active === id ? ' active' : '') + '"' +
+            ' data-tab="' + id + '" role="tab" aria-selected="' + (active === id ? 'true' : 'false') + '">' +
+            svgIcon(icon) + '<span>' + label + '</span>' +
+            (count ? '<em>' + count + '</em>' : '') +
+          '</button>';
         }
 
+        /* تبويب يفتح صفحة قسم (مثل «بكالوريات») */
+        function sectionTab(s) {
+          var kids = sectionChildrenOf(data, s.id).length;
+          return '<a class="sub-tab sub-tab-go" href="section.html?section=' + encodeURIComponent(s.id) + '">' +
+            iconHTML(s.icon, 'file') + '<span>' + escapeHtml(s.title) + '</span>' +
+            (kids ? '<em>' + kids + '</em>' : '') +
+            '<i class="sub-tab-arrow">' + svgIcon('chevron-left') + '</i>' +
+          '</a>';
+        }
+
+        var exercisePages = subjectExercisesOf(data, subject.id).length;
         var tabsHTML =
-          '<div class="sub-tabs-inner">' +
-            tabBtn('units', 'الدروس', 'film') +
-            tabBtn('exercises', 'التمارين', 'pencil') +
-            tabBtn('topics', 'المواضيع', 'book-open') +
-          '</div>' +
-          '<div class="sub-tabs-sections">' +
-            tabs.map(function (s) {
-              return '<a class="sub-tab sub-tab-link" href="section.html?section=' + encodeURIComponent(s.id) + '">' +
-                iconHTML(s.icon, 'file') + '<span>' + escapeHtml(s.title) + '</span>' +
-                (sectionChildrenOf(data, s.id).length
-                  ? '<em>' + sectionChildrenOf(data, s.id).length + '</em>'
-                  : '') + '</a>';
-            }).join('') +
-          '</div>';
+          '<div class="sub-tabs-scroll"><div class="sub-tabs-inner" role="tablist" aria-label="أقسام المادة">' +
+            tabBtn('units', 'الدروس', 'film', units.length) +
+            tabBtn('exercises', 'التمارين', 'pencil', exercisePages + exCount) +
+            tabBtn('topics', 'المواضيع', 'book-open', lessonsCount + topicPages) +
+            tabs.map(sectionTab).join('') +
+          '</div></div>';
+
         var tabsEl = $('#subTabs');
+        tabsEl.className = 'sub-tabs';
         tabsEl.innerHTML = tabsHTML;
 
         tabsEl.addEventListener('click', function (e) {
           var b = e.target.closest('[data-tab]');
           if (!b) return;
           active = b.dataset.tab;
-          $all('.sub-tab', tabsEl).forEach(function (x) { x.classList.toggle('active', x === b); });
+          $all('.sub-tab', tabsEl).forEach(function (x) {
+            var on = x === b;
+            x.classList.toggle('active', on);
+            x.setAttribute('aria-selected', on ? 'true' : 'false');
+          });
           try {
             history.replaceState(null, '', 'subject.html?subject=' + encodeURIComponent(subject.id) + '&tab=' + active);
           } catch (err) { /* تجاهل */ }

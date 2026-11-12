@@ -722,7 +722,26 @@ function deleteFileIfUploaded(url) {
       document.documentElement.style.setProperty('--vw', document.documentElement.clientWidth + 'px');
     } catch (e) { /* تجاهل */ }
   }
-  setVw();
-  window.addEventListener('resize', setVw);
-  window.addEventListener('orientationchange', setVw);
+
+  /* ارتفاع الشريط العلوي الحقيقي: يستخدمه شريط التبويبات اللاصق
+     ليستقر تحته تماماً حتى عندما يلتف الشريط على الهاتف */
+  function setTopbarH() {
+    try {
+      var tb = document.querySelector('.topbar');
+      if (!tb) return;
+      var h = Math.ceil(tb.getBoundingClientRect().height || 0);
+      if (h > 0) document.documentElement.style.setProperty('--topbar-h', h + 'px');
+    } catch (e) { /* تجاهل */ }
+  }
+
+  function sync() { setVw(); setTopbarH(); }
+
+  sync();
+  window.addEventListener('resize', sync);
+  window.addEventListener('orientationchange', sync);
+  window.addEventListener('load', sync);
+  if (typeof ResizeObserver === 'function') {
+    var tb = document.querySelector('.topbar');
+    if (tb) { try { new ResizeObserver(sync).observe(tb); } catch (e) { /* تجاهل */ } }
+  }
 })();
