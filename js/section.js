@@ -85,9 +85,38 @@ function initSectionPage() {
   /* ---------- الأقسام الفرعية ---------- */
   var childrenEl = $('#childrenSection');
 
+  /* الأقسام التي أضافها الأدمن تبقى مرئية حتى في السنة المقسّمة إلى جزأين. */
+  function childrenCards(children) {
+    return children.map(function (c, i) {
+      var subKids = sectionChildrenOf(data, c.id).length;
+      var subRes = resourcesOf(data, c.id).length;
+      var cDone = isItemCompleted(c.id);
+      return '<a class="sec-card sec-card-lg' + (cDone ? ' is-done' : '') + ' ' + colorClass + '" href="section.html?section=' + encodeURIComponent(c.id) + '">' +
+        '<span class="sec-num">' + (i + 1) + '</span>' +
+        '<span class="sec-ico">' + iconHTML(c.icon, 'folder') + '</span>' +
+        '<span class="sec-body">' +
+          '<span class="sec-title">' + escapeHtml(c.title) + '</span>' +
+          '<span class="badges">' +
+            countChip('layers', subKids, 'قسم فرعي') +
+            countChip('file', subRes, 'عنصر محتوى') +
+            (!subKids && !subRes ? emptyChip('لا محتوى بعد') : '') +
+          '</span>' +
+        '</span>' +
+        '<span class="sec-arrow">‹</span>' +
+      '</a>';
+    }).join('');
+  }
+
   /* حالة خاصة: التمرين / سنة البكالوريا → بطاقتان: «الموضوع» و«الحل» */
   if (parts) {
-    $('#childrenTitle').textContent = escapeHtml(section.title) + ' — اختر الموضوع أو الحل';
+    var additionalKids = kids.filter(function (c) {
+      return c.part !== 'topic' && c.part !== 'solution';
+    });
+    if (additionalKids.length) {
+      $('#additionalChildrenSection').hidden = false;
+      $('#additionalChildrenGrid').innerHTML = childrenCards(additionalKids);
+    }
+    $('#childrenTitle').textContent = section.title + ' — اختر الموضوع أو الحل';
     $('#childrenGrid').className = 'part-cards';
     $('#childrenGrid').innerHTML = ['topic', 'solution'].map(function (kind) {
       var part = parts[kind];
@@ -121,24 +150,7 @@ function initSectionPage() {
   } else if (kids.length) {
     $('#childrenTitle').textContent = 'استعرض حسب ' + section.title;
     $('#childrenGrid').className = 'grid sec-children';
-    $('#childrenGrid').innerHTML = kids.map(function (c, i) {
-      var subKids = sectionChildrenOf(data, c.id).length;
-      var subRes = resourcesOf(data, c.id).length;
-      var cDone = isItemCompleted(c.id);
-      return '<a class="sec-card sec-card-lg' + (cDone ? ' is-done' : '') + ' ' + colorClass + '" href="section.html?section=' + encodeURIComponent(c.id) + '">' +
-        '<span class="sec-num">' + (i + 1) + '</span>' +
-        '<span class="sec-ico">' + iconHTML(c.icon, 'folder') + '</span>' +
-        '<span class="sec-body">' +
-          '<span class="sec-title">' + escapeHtml(c.title) + '</span>' +
-          '<span class="badges">' +
-            countChip('layers', subKids, 'قسم فرعي') +
-            countChip('file', subRes, 'عنصر محتوى') +
-            (!subKids && !subRes ? emptyChip('لا محتوى بعد') : '') +
-          '</span>' +
-        '</span>' +
-        '<span class="sec-arrow">‹</span>' +
-      '</a>';
-    }).join('');
+    $('#childrenGrid').innerHTML = childrenCards(kids);
   } else {
     childrenEl.style.display = 'none';
   }
