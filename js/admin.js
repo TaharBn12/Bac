@@ -186,8 +186,8 @@ function initAdminDrawer() {
       if (!link) return;
       currentTab = link.dataset.tab;
       syncAdminNav();
-      renderPanel();
       if (isMobileDrawer()) openDrawer(false);
+      renderPanel();
     });
   }
 }
@@ -991,7 +991,37 @@ function duplicateSubject(id) {
 }
 
 /* ============ عرض اللوحات ============ */
+/* إعادة بناء المحتوى قد تقصّر الصفحة مؤقتاً وتغيّر موضع التمرير، حتى دون scrollTo. */
+function preserveAdminScroll(render) {
+  var x = window.scrollX;
+  var y = window.scrollY;
+  var main = $('.admin-main');
+  var mainTop = main ? main.scrollTop : 0;
+  var mainLeft = main ? main.scrollLeft : 0;
+  try {
+    return render();
+  } finally {
+    if (main) { main.scrollTop = mainTop; main.scrollLeft = mainLeft; }
+    /* instant يتجاوز scroll-behavior: smooth فلا يبدأ تمرير متأخر بعد الحفظ. */
+    window.scrollTo({ left: x, top: y, behavior: 'instant' });
+  }
+}
+
+var lastRenderedAdminTab = null;
 function renderPanel() {
+  var changedTab = lastRenderedAdminTab !== null && lastRenderedAdminTab !== currentTab;
+  lastRenderedAdminTab = currentTab;
+  if (changedTab) {
+    renderPanelContents();
+    var main = $('.admin-main');
+    if (main) { main.scrollTop = 0; main.scrollLeft = 0; }
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  } else {
+    preserveAdminScroll(renderPanelContents);
+  }
+}
+
+function renderPanelContents() {
   var p = $('#panel');
   if (currentTab !== 'schedule' && window._ayaActiveSchedTimer) {
     clearInterval(window._ayaActiveSchedTimer);
@@ -1010,11 +1040,6 @@ function renderPanel() {
   else if (currentTab === 'backup') renderBackupPanel(p);
   var banner = cloudBannerHTML();
   if (banner) p.insertAdjacentHTML('afterbegin', banner);
-  if (window.innerWidth > 980) {
-    var main = $('.admin-main');
-    if (main && main.scrollTop) main.scrollTop = 0;
-  }
-  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 /* ---------- التنقّل بين الأقسام من أي مكان في اللوحة ---------- */
@@ -2630,6 +2655,10 @@ function getSectionConfig(kind, exMode) {
 }
 
 function renderResourceSections(area, lesson, opts) {
+  return preserveAdminScroll(function () { return renderResourceSectionsContent(area, lesson, opts); });
+}
+
+function renderResourceSectionsContent(area, lesson, opts) {
   opts = opts || {};
   var exMode = !!opts.exerciseItemMode;
   /* في صفحة التمارين نضع «صور التمرين والحل» أولاً في الأعلى لأنها الأكثر استخداماً لإضافة مواضيع التمارين وحلولها المصوّرة */
@@ -2707,6 +2736,10 @@ function renderResourceSections(area, lesson, opts) {
 }
 
 function renderDynamicComposer(mount, area, lesson, kind, cfg, opts) {
+  return preserveAdminScroll(function () { return renderDynamicComposerContent(mount, area, lesson, kind, cfg, opts); });
+}
+
+function renderDynamicComposerContent(mount, area, lesson, kind, cfg, opts) {
   if (!mount) return;
   var exMode = !!opts.exerciseItemMode;
   var draft = getComposerDraft(lesson.id, kind);
