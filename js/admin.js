@@ -133,7 +133,7 @@ function showApp() {
 var ADMIN_PAGE_TITLES = {
   overview: 'نظرة عامة', subjects: 'المواد', organizer: 'منظّم المحتوى', units: 'الوحدات',
   lessons: 'الدروس', exercises: 'التمارين', content: 'محتوى الدرس والتمارين',
-  sections: 'الأقسام والبكالوريات', schedule: 'استعمال الزمن', ai: 'الذكاء الاصطناعي', backup: 'نسخ احتياطي'
+  sections: 'الأقسام والبكالوريات', schedule: 'استعمال الزمن', review: 'جدول المراجعة', ai: 'الذكاء الاصطناعي', backup: 'نسخ احتياطي'
 };
 
 function syncAdminNav() {
@@ -1030,6 +1030,7 @@ function renderPanelContents() {
   if (currentTab === 'overview') renderOverviewPanel(p);
   else if (currentTab === 'subjects') renderSubjectsPanel(p);
   else if (currentTab === 'schedule' && typeof renderAdminSchedulePanel === 'function') renderAdminSchedulePanel(p, data);
+  else if (currentTab === 'review' && typeof renderAdminReviewPanel === 'function') renderAdminReviewPanel(p, data);
   else if (currentTab === 'ai' && typeof renderAiPanel === 'function') renderAiPanel(p);
   else if (currentTab === 'organizer') renderOrganizerPanel(p);
   else if (currentTab === 'units') renderUnitsPanel(p);

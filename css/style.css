@@ -2613,3 +2613,56 @@ details[open] > summary .acc-chevron,
   .cnt-chip { padding: 2px 7px; font-size: 11.5px; gap: 3px; }
   .cnt-chip .ic { width: 12px; height: 12px; }
 }
+
+/* جدول المراجعة: الأيام ثابتة على اليمين والأوقات تمتد أفقياً. */
+.review-home-link {
+  display: flex; align-items: center; gap: 16px; margin: 0 0 28px; padding: 18px 20px;
+  border-radius: 20px; color: var(--text); text-decoration: none;
+  background: linear-gradient(120deg, rgba(124,92,255,.19), rgba(36,167,143,.12));
+  transition: transform .2s, background .2s;
+}
+.review-home-link:hover { transform: translateY(-2px); background: linear-gradient(120deg, rgba(124,92,255,.28), rgba(36,167,143,.18)); }
+.review-home-icon { width: 52px; height: 52px; border-radius: 15px; display: grid; place-items: center; flex: 0 0 auto; background: rgba(245,197,66,.16); color: var(--accent); }
+.review-home-icon .ic { width: 26px; height: 26px; }
+.review-home-copy { display: grid; gap: 3px; flex: 1; min-width: 0; }
+.review-home-copy strong { font-size: 18px; font-weight: 900; }
+.review-home-copy small { color: var(--muted); font-size: 13px; }
+.review-home-arrow { font-size: 28px; color: var(--accent); }
+.review-heading { display: flex; align-items: end; justify-content: space-between; gap: 20px; flex-wrap: wrap; margin: 22px 0 24px; }
+.review-heading h1 { font-size: clamp(24px, 3vw, 34px); line-height: 1.4; margin: 5px 0; }
+.review-heading p { color: var(--muted); font-size: 14px; max-width: 720px; margin: 0; }
+.review-kicker { display: flex; align-items: center; gap: 7px; font-weight: 800; color: var(--accent); font-size: 13px; }
+.review-kicker .ic { width: 16px; height: 16px; }
+.review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.review-table-scroll { overflow-x: auto; max-width: 100%; border-radius: 18px; background: var(--card); -webkit-overflow-scrolling: touch; box-shadow: 0 12px 32px rgba(0,0,0,.15); }
+.review-table { width: 100%; min-width: 640px; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.review-table th, .review-table td { border-bottom: 1px solid var(--border-soft); border-inline-start: 1px solid var(--border-soft); padding: 9px; text-align: center; }
+.review-table th { color: var(--muted); background: #242340; font-size: 13px; font-weight: 800; min-width: 145px; }
+.review-table thead th { height: 62px; }
+.review-table th:not(.review-day), .review-table td { min-width: 160px; width: 160px; }
+.review-table tr:last-child th, .review-table tr:last-child td { border-bottom: 0; }
+.review-table .review-day { position: sticky; right: 0; z-index: 2; min-width: 105px; width: 105px; color: var(--text); background: #242340; }
+.review-table thead .review-day { z-index: 3; }
+.review-time { display: inline-block; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.review-time-edit { display: inline-grid; place-items: center; vertical-align: middle; margin-inline-start: 5px; border: 0; background: transparent; color: var(--accent); cursor: pointer; }
+.review-time-edit .ic { width: 14px; height: 14px; }
+.review-cell { width: 100%; min-height: 68px; border: 0; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px; font: inherit; font-size: 13px; font-weight: 800; line-height: 1.5; }
+.review-filled { color: var(--text); background: rgba(124,92,255,.16); position: relative; overflow: hidden; }
+.review-filled::before { content: ''; position: absolute; inset-inline-start: 0; top: 15%; bottom: 15%; width: 3px; border-radius: 5px; background: var(--sc, linear-gradient(135deg, #a78bfa, #f5c542)); }
+button.review-filled, button.review-empty { cursor: pointer; }
+button.review-filled:hover { background: rgba(124,92,255,.26); }
+.review-cell .ic { width: 14px; height: 14px; flex: 0 0 auto; opacity: .7; }
+.review-empty { color: var(--muted); background: rgba(255,255,255,.025); }
+.review-empty:hover { color: var(--accent); background: rgba(245,197,66,.09); }
+.review-dash { color: var(--muted); opacity: .5; }
+.review-dialog-error { color: #ff8a9c; margin-top: 10px; font-size: 13px; }
+.review-form .acts { flex-wrap: wrap; }
+.review-empty-state { padding: 32px 20px; }
+@media (max-width: 560px) {
+  .review-heading { margin-top: 16px; }
+  .review-home-link { padding: 15px; }
+  .review-home-copy strong { font-size: 16px; }
+  .review-table .review-day { min-width: 82px; width: 82px; }
+  .review-table th:not(.review-day), .review-table td { min-width: 150px; width: 150px; }
+  .review-table th, .review-table td { padding: 7px; }
+}
