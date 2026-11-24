@@ -112,15 +112,17 @@ Cloud.loadAll = function () {
 
     /* قراءة استعمال الزمن المعتمد من الإدارة (إن وُجد في السحابة) */
     if (rs[4] && !rs[4].error && Array.isArray(rs[4].data)) {
-      var schedObj = { plan: null, settings: null };
+      var schedObj = { plan: null, settings: null, review: null };
       rs[4].data.forEach(function (row) {
         if (row.id === 'plan' && row.payload && typeof row.payload === 'object') schedObj.plan = row.payload;
         if (row.id === 'settings' && row.payload && typeof row.payload === 'object') schedObj.settings = row.payload;
+        if (row.id === 'review_plan' && row.payload && typeof row.payload === 'object') schedObj.review = row.payload;
       });
       window.CLOUD_SCHEDULE = schedObj;
       try {
         if (schedObj.plan) localStorage.setItem('ayaBacSchedulePlan.v1', JSON.stringify(schedObj.plan));
         if (schedObj.settings) localStorage.setItem('ayaBacScheduleSettings.v1', JSON.stringify(schedObj.settings));
+        if (schedObj.review) localStorage.setItem('ayaBacReviewPlan.v1', JSON.stringify(schedObj.review));
       } catch (e) { /* تجاهل */ }
     }
 
@@ -162,6 +164,23 @@ Cloud.saveSchedule = function (plan, settings) {
     return true;
   }).catch(function (err) {
     console.warn('تعذّر حفظ استعمال الزمن في السحابة:', err);
+    return false;
+  });
+};
+
+/* جدول المراجعة مستقل عن خطة الدروس ولا يغيّر حصصها. */
+Cloud.saveReviewPlan = function (plan) {
+  if (this.mode !== 'cloud') return Promise.resolve(false);
+  var writer = this._writer();
+  if (!writer) return Promise.resolve(false);
+  return Promise.resolve(writer.from('aya_study_schedule').upsert(
+    [{ id: 'review_plan', payload: plan, updated_at: new Date().toISOString() }],
+    { onConflict: 'id' }
+  )).then(function (res) {
+    if (res && res.error) throw res.error;
+    return true;
+  }).catch(function (err) {
+    console.warn('تعذّر حفظ جدول المراجعة في السحابة:', err);
     return false;
   });
 };
