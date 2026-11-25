@@ -104,6 +104,65 @@ function splitReviewGroups(original) {
   return plan;
 }
 
+/* تجميع قابل للتخصيص؛ تُنسخ الأعمدة عند فصل يوم حتى لا تتأثر بقية الأيام. */
+function reviewGroupTitle(days) {
+  if (days.length === 1) return REVIEW_DAYS[days[0]];
+  return days.map(function (day) { return REVIEW_DAYS[day]; }).join('، ');
+}
+function reviewGroups(plan) {
+  var groups = Array.isArray(plan.groups) ? plan.groups : REVIEW_DAY_GROUPS;
+  return groups.map(function (g) { return { id: g.id, days: g.days.slice(), title: reviewGroupTitle(g.days) }; })
+    .sort(function (a, b) { return a.days[0] - b.days[0]; });
+}
+function splitReviewDay(plan, day) {
+  var group = plan.groups.find(function (g) { return g.days.indexOf(day) !== -1; });
+  if (!group || group.days.length < 2) return false;
+  var groupId = 'day-' + day;
+  if (plan.groups.some(function (g) { return g.id === groupId; })) groupId = uid('group');
+  var used = Object.create(null);
+  plan.columns.forEach(function (c) { used[c.id] = true; });
+  var map = Object.create(null);
+  var copies = plan.columns.filter(function (c) { return c.group === group.id; }).map(function (col) {
+    var id; do { id = uid('period'); } while (used[id]);
+    used[id] = true; map[col.id] = id;
+    return Object.assign({}, col, { id: id, group: groupId });
+  });
+  plan.columns = plan.columns.concat(copies);
+  plan.entries.forEach(function (entry) {
+    if (entry.dayIdx === day && map[entry.columnId]) entry.columnId = map[entry.columnId];
+  });
+  group.days = group.days.filter(function (d) { return d !== day; });
+  plan.groups.push({ id: groupId, days: [day] });
+  plan.version = 3;
+  return true;
+}
+function prepareReviewPlan(original) {
+  if (Array.isArray(original.groups)) return JSON.parse(JSON.stringify(original));
+  var plan = splitReviewGroups(original);
+  plan.groups = REVIEW_DAY_GROUPS.map(function (g) { return { id: g.id, days: g.days.slice() }; });
+  splitReviewDay(plan, 4);
+  plan.version = 3;
+  return plan;
+}
+function reviewColor(plan, entry) {
+  var color = entry.color || (plan.subjectColors && plan.subjectColors[entry.subjectId]);
+  return /^#[0-9a-f]{6}$/i.test(color || '') ? color : '';
+}
+function reviewTextColor(color) {
+  var r = parseInt(color.slice(1, 3), 16), g = parseInt(color.slice(3, 5), 16), b = parseInt(color.slice(5, 7), 16);
+  return (r * 299 + g * 587 + b * 114) / 1000 > 150 ? '#17152a' : '#ffffff';
+}
+function setReviewColor(plan, entry, color, all) {
+  if (!/^#[0-9a-f]{6}$/i.test(color || '')) color = '';
+  if (all) {
+    plan.subjectColors = plan.subjectColors || {};
+    if (color) plan.subjectColors[entry.subjectId] = color;
+    else delete plan.subjectColors[entry.subjectId];
+    plan.entries.forEach(function (item) { if (item.subjectId === entry.subjectId) delete item.color; });
+  } else if (color) entry.color = color;
+  else delete entry.color;
+}
+
 /* تغيير عنوان عمود الوقت في مكانه، دون نقل الحصص أو إنشاء عمود آخر. */
 function renameReviewColumn(plan, columnId, time) {
   var column = plan.columns.find(function (c) { return c.id === columnId; });
@@ -125,7 +184,7 @@ function removeReviewColumn(plan, columnId) {
 }
 
 function mountReviewGrid(root, data, admin) {
-  var plan = splitReviewGroups(loadReviewPlan());
+  var plan = prepareReviewPlan(loadReviewPlan());
   var saving = false;
   var days = REVIEW_DAYS;
 
@@ -145,14 +204,14 @@ function mountReviewGrid(root, data, admin) {
     root.innerHTML =
       '<div class="review-heading"><div><div class="review-kicker">' + svgIcon('calendar') + ' خطتك الأسبوعية</div>' +
       '<h1>جدول المراجعة</h1><p>' + (admin
-        ? 'لكل مجموعة أيام أوقاتها الخاصة. اضغط على أي خانة لتعديل المادة ووقتها.'
-        : 'جدولان بأوقات منفصلة: من الأحد إلى الأربعاء، ثم الخميس والجمعة والسبت.') + '</p></div>' +
+        ? 'افصل أي يوم لتخصيص أوقاته، واضغط على الخانة لتعديل المادة واللون.'
+        : 'لكل مجموعة أيام أوقاتها الخاصة. مرّر الجدول أفقياً على الهاتف.') + '</p></div>' +
       '<div class="review-actions"><button type="button" class="btn review-image-btn" data-review-action="show-image">' + svgIcon('image') + ' عرض صورة الجدول</button>' +
       (admin ? '<button type="button" class="btn" data-review-action="import">' + svgIcon('refresh') + ' نسخ استعمال الزمن</button>' +
         (loadReviewDraft() && typeof Cloud !== 'undefined' && Cloud.mode === 'cloud' ? '<button type="button" class="btn" data-review-action="publish">' + svgIcon('upload') + ' نشر التعديلات المحلية</button>' : '') +
         '<a class="btn" href="review.html" target="_blank" rel="noopener">' + svgIcon('eye') + ' معاينة</a>' : '') + '</div></div>' +
       (admin && loadReviewDraft() ? '<div class="cloud-banner warn-banner">هذه نسخة محفوظة على هذا الجهاز ولم تُنشر بعد. عند الاتصال استخدم «نشر التعديلات المحلية» لإتاحتها للطلاب.</div>' : '') +
-      REVIEW_DAY_GROUPS.map(renderGroup).join('');
+      reviewGroups(plan).map(renderGroup).join('');
     $all('.review-table-scroll', root).forEach(function (el) {
       if (Object.prototype.hasOwnProperty.call(offsets, el.dataset.group)) el.scrollLeft = offsets[el.dataset.group];
     });
@@ -160,11 +219,11 @@ function mountReviewGrid(root, data, admin) {
 
   function renderGroup(group) {
     var cols = plan.columns.filter(function (c) { return c.group === group.id; }).sort(function (a, b) { return a.time.localeCompare(b.time); });
-    var head = '<section class="review-day-group" data-review-group="' + group.id + '">' +
+    var head = '<section class="review-day-group" data-review-group="' + escapeHtml(group.id) + '">' +
       '<div class="review-group-head"><div><span class="review-group-kicker">' + svgIcon('clock') + ' أوقات مستقلة</span><h2>' + group.title + '</h2></div>' +
-      (admin ? '<button type="button" class="btn btn-sm" data-review-action="add-time" data-group="' + group.id + '">' + svgIcon('plus') + ' إضافة وقت</button>' : '') + '</div>';
+      (admin ? '<div class="review-group-actions">' + (group.days.length > 1 ? group.days.map(function (day) { return '<button type="button" class="btn btn-sm" data-review-action="split-day" data-day="' + day + '">فصل ' + days[day] + '</button>'; }).join('') : '') + '<button type="button" class="btn btn-sm" data-review-action="add-time" data-group="' + escapeHtml(group.id) + '">' + svgIcon('plus') + ' إضافة وقت</button></div>' : '') + '</div>';
     if (!cols.length) return head + '<div class="empty review-empty-state">' + (admin ? 'لا توجد أوقات لهذه الأيام بعد. اضغط «إضافة وقت».' : 'لا توجد حصص في هذه الأيام بعد.') + '</div></section>';
-    return head + '<div class="review-table-scroll" data-group="' + group.id + '" tabindex="0" role="region" aria-label="جدول ' + group.title + '، قابل للتمرير أفقياً">' +
+    return head + '<div class="review-table-scroll" data-group="' + escapeHtml(group.id) + '" tabindex="0" role="region" aria-label="جدول ' + group.title + '، قابل للتمرير أفقياً">' +
       '<table class="review-table" style="min-width:' + (105 + cols.length * 160) + 'px"><thead><tr><th scope="col" class="review-day">اليوم</th>' +
       cols.map(function (col) {
         return '<th scope="col"><span dir="ltr" class="review-time">' + escapeHtml(col.time) + '</span>' +
@@ -179,10 +238,12 @@ function mountReviewGrid(root, data, admin) {
             var content = '<span class="review-cell-text"><span>' + escapeHtml(subjectLabel(entry.subjectId)) + '</span>' +
               (entry.time ? '<small class="review-cell-time" dir="ltr">' + escapeHtml(entry.time) + '</small>' : '') + '</span>';
             var color = subject && /^[a-z-]+$/.test(subject.color || '') ? ' c-' + subject.color : '';
+            var customColor = reviewColor(plan, entry);
+            var colorStyle = customColor ? ' style="background:' + customColor + ';color:' + reviewTextColor(customColor) + '"' : '';
             return admin
-              ? '<div class="review-cell-wrap"><button type="button" class="review-cell review-filled' + color + '" data-review-action="edit-cell" data-id="' + escapeHtml(entry.id) + '" data-day="' + dayIdx + '" data-col="' + escapeHtml(col.id) + '" aria-label="تعديل ' + escapeHtml(subjectLabel(entry.subjectId)) + ' يوم ' + day + ' في ' + escapeHtml(entry.time || col.time) + '">' + content + svgIcon('pencil') + '</button>' +
+              ? '<div class="review-cell-wrap"><button type="button" class="review-cell review-filled' + color + '"' + colorStyle + ' data-review-action="edit-cell" data-id="' + escapeHtml(entry.id) + '" data-day="' + dayIdx + '" data-col="' + escapeHtml(col.id) + '" aria-label="تعديل ' + escapeHtml(subjectLabel(entry.subjectId)) + ' يوم ' + day + ' في ' + escapeHtml(entry.time || col.time) + '">' + content + svgIcon('pencil') + '</button>' +
                 '<button type="button" class="review-cell-delete" data-review-action="delete-cell" data-id="' + escapeHtml(entry.id) + '" title="حذف الحصة" aria-label="حذف حصة ' + escapeHtml(subjectLabel(entry.subjectId)) + ' يوم ' + day + '">' + svgIcon('trash') + '</button></div>'
-              : '<div class="review-cell review-filled' + color + '">' + content + '</div>';
+              : '<div class="review-cell review-filled' + color + '"' + colorStyle + '>' + content + '</div>';
           }).join('');
           if (admin && !entries.length) cards = '<button type="button" class="review-cell review-empty" data-review-action="edit-cell" data-day="' + dayIdx + '" data-col="' + escapeHtml(col.id) + '" aria-label="إضافة مادة يوم ' + day + ' في ' + escapeHtml(col.time) + '">' + svgIcon('plus') + '<span>إضافة</span></button>';
           if (!cards) cards = '<span class="review-dash" aria-label="لا توجد حصة">—</span>';
@@ -242,7 +303,10 @@ function mountReviewGrid(root, data, admin) {
         '<p class="hint">' + (col ? 'تعديل الوقت يغيّره للحصص التي تتبع وقت العمود، دون تغيير الأوقات الخاصة بالخانات.' : 'أضف وقتاً لتتمكن من ملء خاناته.') + '</p>') +
       '<form class="review-form">' + (mode === 'cell' ? '<label class="field"><span>المادة</span><select class="inp" name="subject" required>' + subjectOptions + '</select></label>' : '') +
       '<label class="field"><span>الوقت</span><input class="inp" name="time" dir="ltr" maxlength="80" required placeholder="08:30 - 10:30" value="' + escapeHtml(entry && entry.time ? entry.time : (col ? col.time : '')) + '"></label>' +
-      '<p class="hint">مثال: 08:30 - 10:30</p><div class="review-dialog-error" role="alert" hidden></div>' +
+      '<p class="hint">مثال: 08:30 - 10:30</p>' + (mode === 'cell' ? '<label class="field"><span>لون الخانة</span><select class="inp" name="colorMode"><option value="default">اللون الافتراضي للمادة</option><option value="custom"' + (entry && reviewColor(plan, entry) ? ' selected' : '') + '>لون مخصص</option></select></label>' +
+      '<label class="field review-color-field"><span>اختر اللون</span><input type="color" name="color" value="' + (entry && reviewColor(plan, entry) || '#8060dc') + '"></label>' +
+      '<label class="field"><span>تطبيق اللون على</span><select class="inp" name="colorScope"><option value="cell">هذه الخانة فقط</option><option value="subject">كل خانات هذه المادة، بما فيها الحصص الجديدة</option></select></label>' : '') +
+      '<div class="review-dialog-error" role="alert" hidden></div>' +
       '<div class="acts"><button type="button" class="btn" data-review-close>إلغاء</button>' +
       (entry ? '<button type="button" class="btn btn-danger" data-review-delete>حذف الحصة</button>' : '') +
       (mode === 'time' && col ? '<button type="button" class="btn btn-danger" data-review-delete-time>حذف عمود الوقت</button>' : '') +
@@ -280,12 +344,15 @@ function mountReviewGrid(root, data, admin) {
         if (!col) next.columns.push({ id: uid('period'), time: time, group: groupId });
       } else if (entry) {
         var existing = next.entries.find(function (item) { return item.id === entry.id; });
+        if (existing.subjectId !== subjectId) delete existing.color;
         existing.subjectId = subjectId;
         setReviewEntryTime(existing, col, time);
+        setReviewColor(next, existing, form.elements.colorMode.value === 'custom' ? form.elements.color.value : '', form.elements.colorScope.value === 'subject');
       } else {
         var added = { id: uid('review'), dayIdx: dayIdx, columnId: col.id, subjectId: subjectId };
         setReviewEntryTime(added, col, time);
         next.entries.push(added);
+        setReviewColor(next, added, form.elements.colorMode.value === 'custom' ? form.elements.color.value : '', form.elements.colorScope.value === 'subject');
       }
       persist(next, null, dialog);
     });
@@ -304,7 +371,12 @@ function mountReviewGrid(root, data, admin) {
     var entry = plan.entries.find(function (item) { return item.id === btn.dataset.id; });
     if (action === 'publish') {
       if (confirm('نشر النسخة المحلية واستبدال جدول المراجعة المنشور؟')) persist(plan);
-    } else if (action === 'add-time' && REVIEW_DAY_GROUPS.some(function (g) { return g.id === btn.dataset.group; })) editDialog('time', null, null, null, btn.dataset.group);
+    } else if (action === 'split-day') {
+      var day = Number(btn.dataset.day);
+      if (!confirm('فصل يوم ' + days[day] + '؟ ستُنسخ أوقاته الحالية لتعديلها مستقلة دون تغيير بقية الأيام.')) return;
+      var next = JSON.parse(JSON.stringify(plan));
+      if (splitReviewDay(next, day)) persist(next);
+    } else if (action === 'add-time' && reviewGroups(plan).some(function (g) { return g.id === btn.dataset.group; })) editDialog('time', null, null, null, btn.dataset.group);
     else if (action === 'edit-time' && col) editDialog('time', null, col, null);
     else if (action === 'delete-time' && col) deleteReviewColumn(col);
     else if (action === 'delete-cell' && entry) deleteReviewEntry(entry);
@@ -313,7 +385,7 @@ function mountReviewGrid(root, data, admin) {
       if (!confirm('نسخ الحصص الحالية من استعمال الزمن واستبدال جدول المراجعة؟ لا يتغير استعمال الزمن الأصلي.')) return;
       var source = typeof loadSavedPlan === 'function' ? loadSavedPlan() : null;
       if (!source || !source.slots || !source.slots.length) { toast('لا توجد حصص في استعمال الزمن لنسخها.', 'info'); return; }
-      persist(splitReviewGroups(reviewFromSchedule(source)));
+      persist(prepareReviewPlan(reviewFromSchedule(source)));
     }
   });
   draw();
@@ -354,13 +426,13 @@ function buildReviewCanvas(plan, data) {
   var canvas = document.createElement('canvas');
   var ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('لا يدعم المتصفح إنشاء صورة للجدول');
-  var groups = REVIEW_DAY_GROUPS.map(function (group) {
+  var groups = reviewGroups(plan).map(function (group) {
     return {
       group: group,
       columns: plan.columns.filter(function (c) { return c.group === group.id; }).slice().sort(function (a, b) { return a.time.localeCompare(b.time); })
     };
   });
-  var maxCols = Math.max(1, groups[0].columns.length, groups[1].columns.length);
+  var maxCols = Math.max.apply(null, [1].concat(groups.map(function (g) { return g.columns.length; })));
   var width = Math.max(2000, 160 + 190 + maxCols * 250);
   if (width > 8000) throw new Error('الجدول عريض جداً لإنشاء صورة؛ قلّل عدد أعمدة الوقت.');
 
@@ -381,7 +453,7 @@ function buildReviewCanvas(plan, data) {
             var name = reviewImageLines(ctx, subject ? subject.name : 'مادة غير متاحة', cw - 32);
             ctx.font = '600 20px Cairo, sans-serif';
             var time = entry.time ? reviewImageLines(ctx, entry.time, cw - 32) : [];
-            return { name: name, time: time, height: 22 + name.length * 32 + time.length * 26 };
+            return { name: name, time: time, color: reviewColor(plan, entry), height: 22 + name.length * 32 + time.length * 26 };
           });
         });
         var height = Math.max.apply(null, [84].concat(cells.map(function (cell) {
@@ -437,10 +509,10 @@ function buildReviewCanvas(plan, data) {
         if (!entries.length) { text('—', x + section.columnWidth / 2, y + row.height / 2, '500 24px Cairo, sans-serif', '#cbc9d8', 'ltr'); return; }
         var cy = y + 6;
         entries.forEach(function (entry) {
-          ctx.fillStyle = '#eeeafb'; ctx.fillRect(x + 6, cy, section.columnWidth - 12, entry.height - 6);
+          ctx.fillStyle = entry.color || '#eeeafb'; ctx.fillRect(x + 6, cy, section.columnWidth - 12, entry.height - 6);
           var ly = cy + 22;
-          entry.name.forEach(function (line) { text(line, x + section.columnWidth / 2, ly, '700 25px Cairo, sans-serif', '#4e3c8e'); ly += 32; });
-          entry.time.forEach(function (line) { text(line, x + section.columnWidth / 2, ly, '600 20px Cairo, sans-serif', '#826a2a', /[\u0600-\u06ff]/.test(line) ? 'rtl' : 'ltr'); ly += 26; });
+          entry.name.forEach(function (line) { text(line, x + section.columnWidth / 2, ly, '700 25px Cairo, sans-serif', entry.color ? reviewTextColor(entry.color) : '#4e3c8e'); ly += 32; });
+          entry.time.forEach(function (line) { text(line, x + section.columnWidth / 2, ly, '600 20px Cairo, sans-serif', entry.color ? reviewTextColor(entry.color) : '#826a2a', /[\u0600-\u06ff]/.test(line) ? 'rtl' : 'ltr'); ly += 26; });
           cy += entry.height;
         });
       });
@@ -452,6 +524,24 @@ function buildReviewCanvas(plan, data) {
   return canvas;
 }
 
+/* رفع اختياري إلى خدمة خارجية: الرابط عام ويبقى مدة مؤقتة حسب الخدمة. */
+function uploadReviewImage(blob) {
+  var form = new FormData();
+  form.append('reqtype', 'fileupload');
+  form.append('time', '24h');
+  form.append('fileToUpload', blob, 'review-schedule.png');
+  return fetch('https://litterbox.catbox.moe/resources/internals/api.php', {
+    method: 'POST', body: form, credentials: 'omit'
+  }).then(function (response) {
+    if (!response.ok) throw new Error('تعذّر رفع الصورة. حاول مجدداً أو نزّلها مباشرة.');
+    return response.text();
+  }).then(function (value) {
+    var url = value.trim();
+    if (!/^https:\/\/litter\.catbox\.moe\/[a-zA-Z0-9._-]+$/.test(url)) throw new Error('لم تُرجع خدمة الرفع رابطاً صالحاً.');
+    return url;
+  });
+}
+
 function showReviewImage(plan, data) {
   if (document.querySelector('.review-image-overlay')) return;
   var overlay = document.createElement('div');
@@ -459,10 +549,10 @@ function showReviewImage(plan, data) {
   overlay.innerHTML = '<div class="modal review-image-modal" role="dialog" aria-modal="true" aria-labelledby="reviewImageTitle">' +
     '<div class="review-image-head"><h2 id="reviewImageTitle">' + svgIcon('image') + ' صورة جدول المراجعة</h2>' +
     '<button type="button" class="icon-btn" data-image-close aria-label="إغلاق">' + svgIcon('x') + '</button></div>' +
-    '<p class="hint">صورة أفقية للجدول الحالي. يمكنك حفظها أو مشاركتها بعد تنزيلها.</p>' +
+    '<p class="hint">يمكنك الرفع إلى Litterbox للحصول على رابط عام مؤقت لمدة 24 ساعة؛ كل من يملك الرابط يستطيع رؤية الصورة. أو نزّلها مباشرة دون رفع.</p>' +
     '<div class="review-image-preview"><span class="review-image-loading">جارٍ تجهيز الصورة…</span></div>' +
-    '<div class="review-image-actions"><a class="btn btn-primary" data-image-download hidden download="جدول-المراجعة.png">' + svgIcon('download') + ' تنزيل الصورة</a>' +
-    '<button type="button" class="btn" data-image-close>إغلاق</button></div></div>';
+    '<div class="review-image-actions"><button type="button" class="btn btn-primary" data-image-upload hidden>' + svgIcon('upload') + ' رفع الصورة للحصول على رابط</button><a class="btn" data-image-download hidden download="جدول-المراجعة.png">' + svgIcon('download') + ' تنزيل مباشر</a>' +
+    '<button type="button" class="btn" data-image-close>إغلاق</button></div><div class="review-upload-result" role="status" aria-live="polite"></div></div>';
   document.body.appendChild(overlay);
   var previousFocus = document.activeElement;
   function close() {
@@ -484,12 +574,31 @@ function showReviewImage(plan, data) {
       if (src === 'data:,') throw new Error('تعذّر إنشاء الصورة بالحجم المطلوب.');
       var image = document.createElement('img');
       image.src = src;
-      image.alt = 'صورة أفقية لجدول المراجعة من الأحد إلى الأربعاء ومن الخميس إلى السبت';
+      image.alt = 'صورة أفقية لجدول المراجعة الأسبوعي';
       var preview = overlay.querySelector('.review-image-preview');
       preview.textContent = '';
       preview.appendChild(image);
       var download = overlay.querySelector('[data-image-download]');
       download.href = src; download.hidden = false;
+      var upload = overlay.querySelector('[data-image-upload]');
+      var result = overlay.querySelector('.review-upload-result');
+      upload.hidden = false;
+      upload.addEventListener('click', function () {
+        if (upload.disabled) return;
+        upload.disabled = true; result.textContent = 'جارٍ رفع الصورة…';
+        try { canvas.toBlob(function (blob) {
+          if (!blob) { result.textContent = 'تعذّر تجهيز الصورة للرفع. استخدم التنزيل المباشر.'; upload.disabled = false; return; }
+          uploadReviewImage(blob).then(function (url) {
+            result.textContent = '';
+            var message = document.createElement('p');
+            message.textContent = 'تم الرفع. افتح الرابط لحفظ الصورة؛ الرابط عام وصالح لمدة 24 ساعة وفق خدمة Litterbox:';
+            var link = document.createElement('a');
+            link.href = url; link.textContent = url; link.target = '_blank'; link.rel = 'noopener noreferrer';
+            result.appendChild(message); result.appendChild(link);
+          }).catch(function () { result.textContent = 'تعذّر الرفع. تحقق من الاتصال أو نزّل الصورة مباشرة.'; })
+            .finally(function () { upload.disabled = false; });
+        }, 'image/png'); } catch (e) { result.textContent = 'تعذّر تجهيز الصورة للرفع. استخدم التنزيل المباشر.'; upload.disabled = false; }
+      });
     } catch (e) {
       overlay.querySelector('.review-image-preview').textContent = (e && e.message && /[\u0600-\u06ff]/.test(e.message)) ? e.message : 'تعذّر إنشاء صورة الجدول على هذا الجهاز. حاول مجدداً.';
     }
