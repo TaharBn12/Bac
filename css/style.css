@@ -2644,14 +2644,24 @@ details[open] > summary .acc-chevron,
 .review-table .review-day { position: sticky; right: 0; z-index: 2; min-width: 105px; width: 105px; color: var(--text); background: #242340; }
 .review-table thead .review-day { z-index: 3; }
 .review-time { display: inline-block; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.review-time-edit { display: inline-grid; place-items: center; vertical-align: middle; margin-inline-start: 5px; border: 0; background: transparent; color: var(--accent); cursor: pointer; }
-.review-time-edit .ic { width: 14px; height: 14px; }
+.review-time-actions { display: inline-flex; justify-content: center; vertical-align: middle; }
+.review-time-edit, .review-time-delete { display: inline-grid; place-items: center; width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--accent); cursor: pointer; }
+.review-time-delete { color: #ee9aa9; }
+.review-time-edit:hover, .review-time-delete:hover { background: rgba(255,255,255,.08); }
+.review-time-edit .ic, .review-time-delete .ic { width: 15px; height: 15px; }
+.review-cell-wrap { position: relative; }
+.review-cell-wrap .review-filled { padding-inline-end: 36px; }
+.review-cell-delete { position: absolute; inset-inline-end: 3px; top: 3px; z-index: 1; display: grid; place-items: center; width: 30px; height: 30px; border: 0; border-radius: 8px; background: rgba(20,18,40,.4); color: #ffb3c0; cursor: pointer; }
+.review-cell-delete:hover { background: rgba(190,60,83,.35); }
+.review-cell-delete .ic { width: 15px; height: 15px; }
 .review-cell { width: 100%; min-height: 68px; border: 0; border-radius: 12px; display: flex; align-items: center; justify-content: center; gap: 6px; padding: 10px; font: inherit; font-size: 13px; font-weight: 800; line-height: 1.5; }
 .review-filled { color: var(--text); background: rgba(124,92,255,.16); position: relative; overflow: hidden; }
 .review-filled::before { content: ''; position: absolute; inset-inline-start: 0; top: 15%; bottom: 15%; width: 3px; border-radius: 5px; background: var(--sc, linear-gradient(135deg, #a78bfa, #f5c542)); }
 button.review-filled, button.review-empty { cursor: pointer; }
 button.review-filled:hover { background: rgba(124,92,255,.26); }
 .review-cell .ic { width: 14px; height: 14px; flex: 0 0 auto; opacity: .7; }
+.review-cell-text { display: grid; gap: 3px; min-width: 0; }
+.review-cell-time { font-size: 11px; font-weight: 700; color: var(--accent); white-space: nowrap; }
 .review-empty { color: var(--muted); background: rgba(255,255,255,.025); }
 .review-empty:hover { color: var(--accent); background: rgba(245,197,66,.09); }
 .review-dash { color: var(--muted); opacity: .5; }
