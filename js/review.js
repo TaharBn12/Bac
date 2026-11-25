@@ -12,16 +12,17 @@ function loadReviewDraft() {
 }
 
 function reviewFromSchedule(plan) {
-  var result = { version: 1, columns: [], entries: [] };
-  var byTime = Object.create(null);
+  var result = { version: 2, columns: [], entries: [] };
+  var byTime = { week: Object.create(null), weekend: Object.create(null) };
   (plan && Array.isArray(plan.slots) ? plan.slots : []).forEach(function (slot) {
     var day = Number(slot.dayIdx);
     if (!Number.isInteger(day) || day < 0 || day > 6 || !slot.subjectId) return;
     var time = String(slot.timeLabel || '').trim() || 'الوقت غير محدد';
-    var column = byTime[time];
+    var group = day >= 4 ? 'weekend' : 'week';
+    var column = byTime[group][time];
     if (!column) {
-      column = { id: uid('period'), time: time };
-      byTime[time] = column;
+      column = { id: uid('period'), time: time, group: group };
+      byTime[group][time] = column;
       result.columns.push(column);
     }
     result.entries.push({ id: uid('review'), dayIdx: day, columnId: column.id, subjectId: String(slot.subjectId) });
@@ -70,10 +71,43 @@ function saveReviewPlan(plan) {
   } catch (e) { return Promise.resolve(false); }
 }
 
+var REVIEW_DAY_GROUPS = [
+  { id: 'week', title: 'الأحد إلى الأربعاء', days: [0, 1, 2, 3] },
+  { id: 'weekend', title: 'الخميس والجمعة والسبت', days: [4, 5, 6] }
+];
+var REVIEW_DAYS = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+
+/* ترحيل غير هدّام للجداول القديمة: ينسخ كل عمود لكل مجموعة ويحافظ على الحصص وأوقاتها. */
+function splitReviewGroups(original) {
+  var plan = JSON.parse(JSON.stringify(original));
+  var mapping = Object.create(null);
+  var used = Object.create(null);
+  plan.columns.forEach(function (c) { used[c.id] = true; });
+  var columns = [];
+  plan.columns.forEach(function (col) {
+    if (col.group === 'week' || col.group === 'weekend') { columns.push(col); return; }
+    var first = Object.assign({}, col, { group: 'week' });
+    var id;
+    do { id = uid('period'); } while (used[id]);
+    used[id] = true;
+    var second = Object.assign({}, col, { id: id, group: 'weekend' });
+    mapping[col.id] = { week: first.id, weekend: second.id };
+    columns.push(first, second);
+  });
+  plan.entries.forEach(function (entry) {
+    if (mapping[entry.columnId]) {
+      entry.columnId = mapping[entry.columnId][entry.dayIdx >= 4 ? 'weekend' : 'week'];
+    }
+  });
+  plan.columns = columns;
+  plan.version = 2;
+  return plan;
+}
+
 /* تغيير عنوان عمود الوقت في مكانه، دون نقل الحصص أو إنشاء عمود آخر. */
 function renameReviewColumn(plan, columnId, time) {
   var column = plan.columns.find(function (c) { return c.id === columnId; });
-  if (!column || plan.columns.some(function (c) { return c.id !== columnId && c.time === time; })) return false;
+  if (!column || plan.columns.some(function (c) { return c.id !== columnId && c.group === column.group && c.time === time; })) return false;
   column.time = time;
   return true;
 }
@@ -91,9 +125,9 @@ function removeReviewColumn(plan, columnId) {
 }
 
 function mountReviewGrid(root, data, admin) {
-  var plan = loadReviewPlan();
+  var plan = splitReviewGroups(loadReviewPlan());
   var saving = false;
-  var days = ['الأحد', 'الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت'];
+  var days = REVIEW_DAYS;
 
   function subjectLabel(id) {
     var s = getSubject(data, id);
@@ -106,45 +140,55 @@ function mountReviewGrid(root, data, admin) {
   }
 
   function drawContent() {
-    var oldScroller = root.querySelector('.review-table-scroll');
-    var scrollLeft = oldScroller ? oldScroller.scrollLeft : 0;
-    var cols = plan.columns.slice().sort(function (a, b) { return a.time.localeCompare(b.time); });
+    var offsets = {};
+    $all('.review-table-scroll', root).forEach(function (el) { offsets[el.dataset.group] = el.scrollLeft; });
     root.innerHTML =
       '<div class="review-heading"><div><div class="review-kicker">' + svgIcon('calendar') + ' خطتك الأسبوعية</div>' +
       '<h1>جدول المراجعة</h1><p>' + (admin
-        ? 'اضغط على أي خانة لتعديل المادة ووقتها. الوقت الخاص يظهر داخل الخانة، دون تغيير بقية الأيام.'
-        : 'الأيام على اليمين والأوقات في الأعلى؛ أي وقت خاص يظهر داخل خانته. مرّر الجدول أفقياً على الهاتف.') + '</p></div>' +
-      (admin ? '<div class="review-actions"><button type="button" class="btn btn-primary" data-review-action="add-time">' + svgIcon('plus') + ' إضافة وقت</button>' +
-        '<button type="button" class="btn" data-review-action="import">' + svgIcon('refresh') + ' نسخ استعمال الزمن</button>' +
+        ? 'لكل مجموعة أيام أوقاتها الخاصة. اضغط على أي خانة لتعديل المادة ووقتها.'
+        : 'جدولان بأوقات منفصلة: من الأحد إلى الأربعاء، ثم الخميس والجمعة والسبت.') + '</p></div>' +
+      '<div class="review-actions"><button type="button" class="btn review-image-btn" data-review-action="show-image">' + svgIcon('image') + ' عرض صورة الجدول</button>' +
+      (admin ? '<button type="button" class="btn" data-review-action="import">' + svgIcon('refresh') + ' نسخ استعمال الزمن</button>' +
         (loadReviewDraft() && typeof Cloud !== 'undefined' && Cloud.mode === 'cloud' ? '<button type="button" class="btn" data-review-action="publish">' + svgIcon('upload') + ' نشر التعديلات المحلية</button>' : '') +
-        '<a class="btn" href="review.html" target="_blank">' + svgIcon('eye') + ' معاينة</a></div>' : '') + '</div>' +
+        '<a class="btn" href="review.html" target="_blank" rel="noopener">' + svgIcon('eye') + ' معاينة</a>' : '') + '</div></div>' +
       (admin && loadReviewDraft() ? '<div class="cloud-banner warn-banner">هذه نسخة محفوظة على هذا الجهاز ولم تُنشر بعد. عند الاتصال استخدم «نشر التعديلات المحلية» لإتاحتها للطلاب.</div>' : '') +
-      (cols.length ? '<div class="review-table-scroll" tabindex="0" role="region" aria-label="جدول المراجعة، قابل للتمرير أفقياً">' +
-        '<table class="review-table" style="min-width:' + (105 + cols.length * 160) + 'px"><thead><tr><th scope="col" class="review-day">اليوم</th>' +
-        cols.map(function (col) {
-          return '<th scope="col"><span dir="ltr" class="review-time">' + escapeHtml(col.time) + '</span>' +
-            (admin ? '<span class="review-time-actions"><button type="button" class="review-time-edit" data-review-action="edit-time" data-col="' + escapeHtml(col.id) + '" title="تعديل الوقت" aria-label="تعديل الوقت ' + escapeHtml(col.time) + '">' + svgIcon('pencil') + '</button>' +
-              '<button type="button" class="review-time-delete" data-review-action="delete-time" data-col="' + escapeHtml(col.id) + '" title="حذف عمود الوقت" aria-label="حذف عمود الوقت ' + escapeHtml(col.time) + '">' + svgIcon('trash') + '</button></span>' : '') + '</th>';
-        }).join('') + '</tr></thead><tbody>' + days.map(function (day, dayIdx) {
-          return '<tr><th scope="row" class="review-day">' + day + '</th>' + cols.map(function (col) {
-            var entries = plan.entries.filter(function (e) { return e.dayIdx === dayIdx && e.columnId === col.id; });
-            var cards = entries.map(function (entry) {
-              var subject = getSubject(data, entry.subjectId);
-              var content = '<span class="review-cell-text"><span>' + escapeHtml(subjectLabel(entry.subjectId)) + '</span>' +
-                (entry.time ? '<small class="review-cell-time" dir="ltr">' + escapeHtml(entry.time) + '</small>' : '') + '</span>';
-              var color = subject && /^[a-z-]+$/.test(subject.color || '') ? ' c-' + subject.color : '';
-              return admin
-                ? '<div class="review-cell-wrap"><button type="button" class="review-cell review-filled' + color + '" data-review-action="edit-cell" data-id="' + escapeHtml(entry.id) + '" data-day="' + dayIdx + '" data-col="' + escapeHtml(col.id) + '" aria-label="تعديل ' + escapeHtml(subjectLabel(entry.subjectId)) + ' يوم ' + day + ' في ' + escapeHtml(entry.time || col.time) + '">' + content + svgIcon('pencil') + '</button>' +
-                  '<button type="button" class="review-cell-delete" data-review-action="delete-cell" data-id="' + escapeHtml(entry.id) + '" title="حذف الحصة" aria-label="حذف حصة ' + escapeHtml(subjectLabel(entry.subjectId)) + ' يوم ' + day + '">' + svgIcon('trash') + '</button></div>'
-                : '<div class="review-cell review-filled' + color + '">' + content + '</div>';
-            }).join('');
-            if (admin && !entries.length) cards = '<button type="button" class="review-cell review-empty" data-review-action="edit-cell" data-day="' + dayIdx + '" data-col="' + escapeHtml(col.id) + '" aria-label="إضافة مادة يوم ' + day + ' في ' + escapeHtml(col.time) + '">' + svgIcon('plus') + '<span>إضافة</span></button>';
-            if (!cards) cards = '<span class="review-dash" aria-label="لا توجد حصة">—</span>';
-            return '<td>' + cards + '</td>';
-          }).join('') + '</tr>';
-        }).join('') + '</tbody></table></div>' : '<div class="empty review-empty-state">' + (admin ? 'لا توجد أوقات بعد. أضف وقتاً أو انسخ الحصص من استعمال الزمن.' : 'لم تضف الإدارة جدول مراجعة بعد.') + '</div>');
-    var newScroller = root.querySelector('.review-table-scroll');
-    if (newScroller) newScroller.scrollLeft = scrollLeft;
+      REVIEW_DAY_GROUPS.map(renderGroup).join('');
+    $all('.review-table-scroll', root).forEach(function (el) {
+      if (Object.prototype.hasOwnProperty.call(offsets, el.dataset.group)) el.scrollLeft = offsets[el.dataset.group];
+    });
+  }
+
+  function renderGroup(group) {
+    var cols = plan.columns.filter(function (c) { return c.group === group.id; }).sort(function (a, b) { return a.time.localeCompare(b.time); });
+    var head = '<section class="review-day-group" data-review-group="' + group.id + '">' +
+      '<div class="review-group-head"><div><span class="review-group-kicker">' + svgIcon('clock') + ' أوقات مستقلة</span><h2>' + group.title + '</h2></div>' +
+      (admin ? '<button type="button" class="btn btn-sm" data-review-action="add-time" data-group="' + group.id + '">' + svgIcon('plus') + ' إضافة وقت</button>' : '') + '</div>';
+    if (!cols.length) return head + '<div class="empty review-empty-state">' + (admin ? 'لا توجد أوقات لهذه الأيام بعد. اضغط «إضافة وقت».' : 'لا توجد حصص في هذه الأيام بعد.') + '</div></section>';
+    return head + '<div class="review-table-scroll" data-group="' + group.id + '" tabindex="0" role="region" aria-label="جدول ' + group.title + '، قابل للتمرير أفقياً">' +
+      '<table class="review-table" style="min-width:' + (105 + cols.length * 160) + 'px"><thead><tr><th scope="col" class="review-day">اليوم</th>' +
+      cols.map(function (col) {
+        return '<th scope="col"><span dir="ltr" class="review-time">' + escapeHtml(col.time) + '</span>' +
+          (admin ? '<span class="review-time-actions"><button type="button" class="review-time-edit" data-review-action="edit-time" data-col="' + escapeHtml(col.id) + '" title="تعديل الوقت" aria-label="تعديل الوقت ' + escapeHtml(col.time) + '، ' + group.title + '">' + svgIcon('pencil') + '</button>' +
+          '<button type="button" class="review-time-delete" data-review-action="delete-time" data-col="' + escapeHtml(col.id) + '" title="حذف عمود الوقت" aria-label="حذف عمود الوقت ' + escapeHtml(col.time) + '، ' + group.title + '">' + svgIcon('trash') + '</button></span>' : '') + '</th>';
+      }).join('') + '</tr></thead><tbody>' + group.days.map(function (dayIdx) {
+        var day = days[dayIdx];
+        return '<tr><th scope="row" class="review-day">' + day + '</th>' + cols.map(function (col) {
+          var entries = plan.entries.filter(function (e) { return e.dayIdx === dayIdx && e.columnId === col.id; });
+          var cards = entries.map(function (entry) {
+            var subject = getSubject(data, entry.subjectId);
+            var content = '<span class="review-cell-text"><span>' + escapeHtml(subjectLabel(entry.subjectId)) + '</span>' +
+              (entry.time ? '<small class="review-cell-time" dir="ltr">' + escapeHtml(entry.time) + '</small>' : '') + '</span>';
+            var color = subject && /^[a-z-]+$/.test(subject.color || '') ? ' c-' + subject.color : '';
+            return admin
+              ? '<div class="review-cell-wrap"><button type="button" class="review-cell review-filled' + color + '" data-review-action="edit-cell" data-id="' + escapeHtml(entry.id) + '" data-day="' + dayIdx + '" data-col="' + escapeHtml(col.id) + '" aria-label="تعديل ' + escapeHtml(subjectLabel(entry.subjectId)) + ' يوم ' + day + ' في ' + escapeHtml(entry.time || col.time) + '">' + content + svgIcon('pencil') + '</button>' +
+                '<button type="button" class="review-cell-delete" data-review-action="delete-cell" data-id="' + escapeHtml(entry.id) + '" title="حذف الحصة" aria-label="حذف حصة ' + escapeHtml(subjectLabel(entry.subjectId)) + ' يوم ' + day + '">' + svgIcon('trash') + '</button></div>'
+              : '<div class="review-cell review-filled' + color + '">' + content + '</div>';
+          }).join('');
+          if (admin && !entries.length) cards = '<button type="button" class="review-cell review-empty" data-review-action="edit-cell" data-day="' + dayIdx + '" data-col="' + escapeHtml(col.id) + '" aria-label="إضافة مادة يوم ' + day + ' في ' + escapeHtml(col.time) + '">' + svgIcon('plus') + '<span>إضافة</span></button>';
+          if (!cards) cards = '<span class="review-dash" aria-label="لا توجد حصة">—</span>';
+          return '<td>' + cards + '</td>';
+        }).join('') + '</tr>';
+      }).join('') + '</tbody></table></div></section>';
   }
 
   function persist(next, onSuccess, dialog) {
@@ -182,7 +226,7 @@ function mountReviewGrid(root, data, admin) {
     persist(next, null, dialog);
   }
 
-  function editDialog(mode, dayIdx, col, entry) {
+  function editDialog(mode, dayIdx, col, entry, groupId) {
     if (saving) return;
     var dialog = document.createElement('div');
     dialog.className = 'modal-overlay';
@@ -222,7 +266,7 @@ function mountReviewGrid(root, data, admin) {
       if (!time || (mode === 'cell' && !subjectId)) { showError('يرجى اختيار المادة وكتابة الوقت.'); return; }
       var next = JSON.parse(JSON.stringify(plan));
       if (mode === 'time') {
-        var existingTime = next.columns.find(function (c) { return c.time === time; });
+        var existingTime = next.columns.find(function (c) { return c.group === (col ? col.group : groupId) && c.time === time; });
         if (existingTime && (!col || existingTime.id !== col.id)) {
           showError('هذا الوقت موجود بالفعل في عمود آخر.'); return;
         }
@@ -233,7 +277,7 @@ function mountReviewGrid(root, data, admin) {
           if (affectedCount && !confirm('تغيير وقت العمود سيغيّر وقت ' + affectedCount + ' حصة تتبعه. الأوقات الخاصة بالخانات لن تتغير. هل تريد المتابعة؟')) return;
           if (!renameReviewColumn(next, col.id, time)) { showError('تعذّر تعديل الوقت.'); return; }
         }
-        if (!col) next.columns.push({ id: uid('period'), time: time });
+        if (!col) next.columns.push({ id: uid('period'), time: time, group: groupId });
       } else if (entry) {
         var existing = next.entries.find(function (item) { return item.id === entry.id; });
         existing.subjectId = subjectId;
@@ -250,15 +294,17 @@ function mountReviewGrid(root, data, admin) {
   }
 
   root.addEventListener('click', function (e) {
-    if (!admin || saving) return;
+    if (saving) return;
     var btn = e.target.closest('[data-review-action]');
     if (!btn || !root.contains(btn)) return;
     var action = btn.dataset.reviewAction;
+    if (action === 'show-image') { showReviewImage(plan, data); return; }
+    if (!admin) return;
     var col = plan.columns.find(function (c) { return c.id === btn.dataset.col; });
     var entry = plan.entries.find(function (item) { return item.id === btn.dataset.id; });
     if (action === 'publish') {
       if (confirm('نشر النسخة المحلية واستبدال جدول المراجعة المنشور؟')) persist(plan);
-    } else if (action === 'add-time') editDialog('time', null, null, null);
+    } else if (action === 'add-time' && REVIEW_DAY_GROUPS.some(function (g) { return g.id === btn.dataset.group; })) editDialog('time', null, null, null, btn.dataset.group);
     else if (action === 'edit-time' && col) editDialog('time', null, col, null);
     else if (action === 'delete-time' && col) deleteReviewColumn(col);
     else if (action === 'delete-cell' && entry) deleteReviewEntry(entry);
@@ -267,7 +313,7 @@ function mountReviewGrid(root, data, admin) {
       if (!confirm('نسخ الحصص الحالية من استعمال الزمن واستبدال جدول المراجعة؟ لا يتغير استعمال الزمن الأصلي.')) return;
       var source = typeof loadSavedPlan === 'function' ? loadSavedPlan() : null;
       if (!source || !source.slots || !source.slots.length) { toast('لا توجد حصص في استعمال الزمن لنسخها.', 'info'); return; }
-      persist(reviewFromSchedule(source));
+      persist(splitReviewGroups(reviewFromSchedule(source)));
     }
   });
   draw();
@@ -284,4 +330,168 @@ function initReviewPage() {
   mountReviewGrid(document.getElementById('studentReviewRoot'), data, false);
   var out = document.getElementById('logoutBtn');
   if (out) out.addEventListener('click', doLogout);
+}
+
+/* صورة أفقية تُرسم محلياً من البيانات الفعلية، دون إرسال الجدول إلى خدمة خارجية. */
+function reviewImageLines(ctx, value, maxWidth) {
+  var words = String(value || '').trim().split(/\s+/).filter(Boolean);
+  var lines = [], line = '';
+  words.forEach(function (word) {
+    var candidate = line ? line + ' ' + word : word;
+    if (ctx.measureText(candidate).width <= maxWidth) { line = candidate; return; }
+    if (line) { lines.push(line); line = ''; }
+    /* الكلمات الطويلة جداً تُقسَّم كي لا تختفي خارج الخانة. */
+    Array.from(word).forEach(function (character) {
+      if (line && ctx.measureText(line + character).width > maxWidth) { lines.push(line); line = ''; }
+      line += character;
+    });
+  });
+  if (line) lines.push(line);
+  return lines.length ? lines : [''];
+}
+
+function buildReviewCanvas(plan, data) {
+  var canvas = document.createElement('canvas');
+  var ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('لا يدعم المتصفح إنشاء صورة للجدول');
+  var groups = REVIEW_DAY_GROUPS.map(function (group) {
+    return {
+      group: group,
+      columns: plan.columns.filter(function (c) { return c.group === group.id; }).slice().sort(function (a, b) { return a.time.localeCompare(b.time); })
+    };
+  });
+  var maxCols = Math.max(1, groups[0].columns.length, groups[1].columns.length);
+  var width = Math.max(2000, 160 + 190 + maxCols * 250);
+  if (width > 8000) throw new Error('الجدول عريض جداً لإنشاء صورة؛ قلّل عدد أعمدة الوقت.');
+
+  function layout(w) {
+    var contentWidth = w - 160, dayWidth = 190;
+    var y = 200;
+    return groups.map(function (section) {
+      var n = Math.max(1, section.columns.length);
+      var cw = (contentWidth - dayWidth) / n;
+      ctx.font = '700 24px Cairo, sans-serif';
+      var headerLines = section.columns.map(function (col) { return reviewImageLines(ctx, col.time, cw - 24); });
+      var headerHeight = Math.max(68, 22 + Math.max.apply(null, [1].concat(headerLines.map(function (l) { return l.length; }))) * 30);
+      var rows = section.group.days.map(function (dayIdx) {
+        var cells = section.columns.map(function (col) {
+          return plan.entries.filter(function (e) { return e.dayIdx === dayIdx && e.columnId === col.id; }).map(function (entry) {
+            var subject = getSubject(data, entry.subjectId);
+            ctx.font = '700 25px Cairo, sans-serif';
+            var name = reviewImageLines(ctx, subject ? subject.name : 'مادة غير متاحة', cw - 32);
+            ctx.font = '600 20px Cairo, sans-serif';
+            var time = entry.time ? reviewImageLines(ctx, entry.time, cw - 32) : [];
+            return { name: name, time: time, height: 22 + name.length * 32 + time.length * 26 };
+          });
+        });
+        var height = Math.max.apply(null, [84].concat(cells.map(function (cell) {
+          return 12 + cell.reduce(function (sum, entry) { return sum + entry.height; }, 0);
+        })));
+        return { dayIdx: dayIdx, cells: cells, height: height };
+      });
+      var result = { group: section.group, columns: section.columns, headerLines: headerLines, headerHeight: headerHeight, rows: rows, y: y, columnWidth: cw, dayWidth: dayWidth, contentWidth: contentWidth };
+      y += 64 + headerHeight + rows.reduce(function (sum, r) { return sum + r.height; }, 0) + 50;
+      result.end = y;
+      return result;
+    });
+  }
+
+  var parts = layout(width);
+  var height = parts[parts.length - 1].end + 70;
+  /* ضمان صيغة أفقية حتى مع نصوص طويلة أو عدة مواد في خلية واحدة. */
+  if (height >= width) { width = height + 180; parts = layout(width); height = parts[parts.length - 1].end + 70; }
+  if (width > 8000 || height > 8000) throw new Error('الجدول كبير جداً لإنشاء صورة؛ قلّل عدد الأعمدة أو الحصص.');
+  canvas.width = width; canvas.height = height;
+  ctx.fillStyle = '#f7f6fc'; ctx.fillRect(0, 0, width, height);
+  function text(value, x, y, font, color, direction) {
+    ctx.font = font; ctx.fillStyle = color; ctx.direction = direction || 'rtl';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(value), x, y);
+  }
+  text('جدول المراجعة الأسبوعي', width / 2, 76, '800 54px Cairo, sans-serif', '#252443');
+  text('الأيام على اليمين · الأوقات في الأعلى', width / 2, 134, '600 25px Cairo, sans-serif', '#706f87');
+
+  parts.forEach(function (section) {
+    var left = 80, right = width - 80, dayX = right - section.dayWidth;
+    var y = section.y;
+    ctx.fillStyle = '#634bcc'; ctx.fillRect(right - 8, y + 7, 8, 30);
+    ctx.font = '800 32px Cairo, sans-serif'; ctx.fillStyle = '#302d4c';
+    ctx.direction = 'rtl'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.fillText(section.group.title, right - 26, y + 25);
+    y += 64;
+    ctx.fillStyle = '#e9e6f6'; ctx.fillRect(left, y, section.contentWidth, section.headerHeight);
+    text('اليوم', dayX + section.dayWidth / 2, y + section.headerHeight / 2, '800 26px Cairo, sans-serif', '#373454');
+    if (!section.columns.length) text('لا توجد أوقات', (left + dayX) / 2, y + section.headerHeight / 2, '600 24px Cairo, sans-serif', '#706f87');
+    section.columns.forEach(function (col, i) {
+      var x = dayX - (i + 1) * section.columnWidth;
+      var lines = section.headerLines[i], startY = y + (section.headerHeight - lines.length * 30) / 2 + 15;
+      lines.forEach(function (line, j) { text(line, x + section.columnWidth / 2, startY + j * 30, '700 24px Cairo, sans-serif', '#57516e', /[\u0600-\u06ff]/.test(line) ? 'rtl' : 'ltr'); });
+    });
+    y += section.headerHeight;
+    section.rows.forEach(function (row) {
+      ctx.fillStyle = '#ffffff'; ctx.fillRect(left, y, section.contentWidth, row.height);
+      ctx.fillStyle = '#f0eef9'; ctx.fillRect(dayX, y, section.dayWidth, row.height);
+      text(REVIEW_DAYS[row.dayIdx], dayX + section.dayWidth / 2, y + row.height / 2, '800 26px Cairo, sans-serif', '#373454');
+      row.cells.forEach(function (entries, i) {
+        var x = dayX - (i + 1) * section.columnWidth;
+        ctx.strokeStyle = '#e4e2ef'; ctx.lineWidth = 1; ctx.strokeRect(x, y, section.columnWidth, row.height);
+        if (!entries.length) { text('—', x + section.columnWidth / 2, y + row.height / 2, '500 24px Cairo, sans-serif', '#cbc9d8', 'ltr'); return; }
+        var cy = y + 6;
+        entries.forEach(function (entry) {
+          ctx.fillStyle = '#eeeafb'; ctx.fillRect(x + 6, cy, section.columnWidth - 12, entry.height - 6);
+          var ly = cy + 22;
+          entry.name.forEach(function (line) { text(line, x + section.columnWidth / 2, ly, '700 25px Cairo, sans-serif', '#4e3c8e'); ly += 32; });
+          entry.time.forEach(function (line) { text(line, x + section.columnWidth / 2, ly, '600 20px Cairo, sans-serif', '#826a2a', /[\u0600-\u06ff]/.test(line) ? 'rtl' : 'ltr'); ly += 26; });
+          cy += entry.height;
+        });
+      });
+      ctx.strokeStyle = '#e4e2ef'; ctx.strokeRect(dayX, y, section.dayWidth, row.height);
+      y += row.height;
+    });
+  });
+  text('آية باك 2027', width / 2, height - 45, '700 22px Cairo, sans-serif', '#8a879d');
+  return canvas;
+}
+
+function showReviewImage(plan, data) {
+  if (document.querySelector('.review-image-overlay')) return;
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay review-image-overlay';
+  overlay.innerHTML = '<div class="modal review-image-modal" role="dialog" aria-modal="true" aria-labelledby="reviewImageTitle">' +
+    '<div class="review-image-head"><h2 id="reviewImageTitle">' + svgIcon('image') + ' صورة جدول المراجعة</h2>' +
+    '<button type="button" class="icon-btn" data-image-close aria-label="إغلاق">' + svgIcon('x') + '</button></div>' +
+    '<p class="hint">صورة أفقية للجدول الحالي. يمكنك حفظها أو مشاركتها بعد تنزيلها.</p>' +
+    '<div class="review-image-preview"><span class="review-image-loading">جارٍ تجهيز الصورة…</span></div>' +
+    '<div class="review-image-actions"><a class="btn btn-primary" data-image-download hidden download="جدول-المراجعة.png">' + svgIcon('download') + ' تنزيل الصورة</a>' +
+    '<button type="button" class="btn" data-image-close>إغلاق</button></div></div>';
+  document.body.appendChild(overlay);
+  var previousFocus = document.activeElement;
+  function close() {
+    overlay.remove();
+    document.removeEventListener('keydown', onKey);
+    if (previousFocus && previousFocus.focus) previousFocus.focus({ preventScroll: true });
+  }
+  function onKey(e) { if (e.key === 'Escape') close(); }
+  document.addEventListener('keydown', onKey);
+  $all('[data-image-close]', overlay).forEach(function (el) { el.addEventListener('click', close); });
+  overlay.addEventListener('click', function (e) { if (e.target === overlay) close(); });
+  overlay.querySelector('[data-image-close]').focus({ preventScroll: true });
+  var ready = document.fonts && document.fonts.ready ? document.fonts.ready.catch(function () {}) : Promise.resolve();
+  Promise.race([ready, new Promise(function (resolve) { setTimeout(resolve, 2500); })]).then(function () {
+    if (!overlay.isConnected) return;
+    try {
+      var canvas = buildReviewCanvas(plan, data);
+      var src = canvas.toDataURL('image/png');
+      if (src === 'data:,') throw new Error('تعذّر إنشاء الصورة بالحجم المطلوب.');
+      var image = document.createElement('img');
+      image.src = src;
+      image.alt = 'صورة أفقية لجدول المراجعة من الأحد إلى الأربعاء ومن الخميس إلى السبت';
+      var preview = overlay.querySelector('.review-image-preview');
+      preview.textContent = '';
+      preview.appendChild(image);
+      var download = overlay.querySelector('[data-image-download]');
+      download.href = src; download.hidden = false;
+    } catch (e) {
+      overlay.querySelector('.review-image-preview').textContent = (e && e.message && /[\u0600-\u06ff]/.test(e.message)) ? e.message : 'تعذّر إنشاء صورة الجدول على هذا الجهاز. حاول مجدداً.';
+    }
+  });
 }
