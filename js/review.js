@@ -70,6 +70,26 @@ function saveReviewPlan(plan) {
   } catch (e) { return Promise.resolve(false); }
 }
 
+/* تغيير عنوان عمود الوقت في مكانه، دون نقل الحصص أو إنشاء عمود آخر. */
+function renameReviewColumn(plan, columnId, time) {
+  var column = plan.columns.find(function (c) { return c.id === columnId; });
+  if (!column || plan.columns.some(function (c) { return c.id !== columnId && c.time === time; })) return false;
+  column.time = time;
+  return true;
+}
+
+/* وقت خاص بالحصة عند اختلافه عن عنوان العمود، دون تغيير بقية الأيام. */
+function setReviewEntryTime(entry, column, time) {
+  if (time === column.time) delete entry.time;
+  else entry.time = time;
+}
+
+/* حذف عمود الوقت يزيل حصصه فقط؛ حذف حصة منفردة لا يحذف العمود. */
+function removeReviewColumn(plan, columnId) {
+  plan.columns = plan.columns.filter(function (c) { return c.id !== columnId; });
+  plan.entries = plan.entries.filter(function (e) { return e.columnId !== columnId; });
+}
+
 function mountReviewGrid(root, data, admin) {
   var plan = loadReviewPlan();
   var saving = false;
@@ -92,8 +112,8 @@ function mountReviewGrid(root, data, admin) {
     root.innerHTML =
       '<div class="review-heading"><div><div class="review-kicker">' + svgIcon('calendar') + ' خطتك الأسبوعية</div>' +
       '<h1>جدول المراجعة</h1><p>' + (admin
-        ? 'اضغط على أي خانة لإضافة المادة أو تعديلها ووقتها. الجدول مستقل عن استعمال الزمن بعد حفظه.'
-        : 'الأيام على اليمين، والأوقات في الأعلى. مرّر الجدول أفقياً على الهاتف.') + '</p></div>' +
+        ? 'اضغط على أي خانة لتعديل المادة ووقتها. الوقت الخاص يظهر داخل الخانة، دون تغيير بقية الأيام.'
+        : 'الأيام على اليمين والأوقات في الأعلى؛ أي وقت خاص يظهر داخل خانته. مرّر الجدول أفقياً على الهاتف.') + '</p></div>' +
       (admin ? '<div class="review-actions"><button type="button" class="btn btn-primary" data-review-action="add-time">' + svgIcon('plus') + ' إضافة وقت</button>' +
         '<button type="button" class="btn" data-review-action="import">' + svgIcon('refresh') + ' نسخ استعمال الزمن</button>' +
         (loadReviewDraft() && typeof Cloud !== 'undefined' && Cloud.mode === 'cloud' ? '<button type="button" class="btn" data-review-action="publish">' + svgIcon('upload') + ' نشر التعديلات المحلية</button>' : '') +
@@ -103,16 +123,19 @@ function mountReviewGrid(root, data, admin) {
         '<table class="review-table" style="min-width:' + (105 + cols.length * 160) + 'px"><thead><tr><th scope="col" class="review-day">اليوم</th>' +
         cols.map(function (col) {
           return '<th scope="col"><span dir="ltr" class="review-time">' + escapeHtml(col.time) + '</span>' +
-            (admin ? '<button type="button" class="review-time-edit" data-review-action="edit-time" data-col="' + escapeHtml(col.id) + '" aria-label="تعديل الوقت ' + escapeHtml(col.time) + '">' + svgIcon('pencil') + '</button>' : '') + '</th>';
+            (admin ? '<span class="review-time-actions"><button type="button" class="review-time-edit" data-review-action="edit-time" data-col="' + escapeHtml(col.id) + '" title="تعديل الوقت" aria-label="تعديل الوقت ' + escapeHtml(col.time) + '">' + svgIcon('pencil') + '</button>' +
+              '<button type="button" class="review-time-delete" data-review-action="delete-time" data-col="' + escapeHtml(col.id) + '" title="حذف عمود الوقت" aria-label="حذف عمود الوقت ' + escapeHtml(col.time) + '">' + svgIcon('trash') + '</button></span>' : '') + '</th>';
         }).join('') + '</tr></thead><tbody>' + days.map(function (day, dayIdx) {
           return '<tr><th scope="row" class="review-day">' + day + '</th>' + cols.map(function (col) {
             var entries = plan.entries.filter(function (e) { return e.dayIdx === dayIdx && e.columnId === col.id; });
             var cards = entries.map(function (entry) {
               var subject = getSubject(data, entry.subjectId);
-              var content = '<span>' + escapeHtml(subjectLabel(entry.subjectId)) + '</span>';
+              var content = '<span class="review-cell-text"><span>' + escapeHtml(subjectLabel(entry.subjectId)) + '</span>' +
+                (entry.time ? '<small class="review-cell-time" dir="ltr">' + escapeHtml(entry.time) + '</small>' : '') + '</span>';
               var color = subject && /^[a-z-]+$/.test(subject.color || '') ? ' c-' + subject.color : '';
               return admin
-                ? '<button type="button" class="review-cell review-filled' + color + '" data-review-action="edit-cell" data-id="' + escapeHtml(entry.id) + '" data-day="' + dayIdx + '" data-col="' + escapeHtml(col.id) + '" aria-label="تعديل ' + escapeHtml(subjectLabel(entry.subjectId)) + ' يوم ' + day + ' في ' + escapeHtml(col.time) + '">' + content + svgIcon('pencil') + '</button>'
+                ? '<div class="review-cell-wrap"><button type="button" class="review-cell review-filled' + color + '" data-review-action="edit-cell" data-id="' + escapeHtml(entry.id) + '" data-day="' + dayIdx + '" data-col="' + escapeHtml(col.id) + '" aria-label="تعديل ' + escapeHtml(subjectLabel(entry.subjectId)) + ' يوم ' + day + ' في ' + escapeHtml(entry.time || col.time) + '">' + content + svgIcon('pencil') + '</button>' +
+                  '<button type="button" class="review-cell-delete" data-review-action="delete-cell" data-id="' + escapeHtml(entry.id) + '" title="حذف الحصة" aria-label="حذف حصة ' + escapeHtml(subjectLabel(entry.subjectId)) + ' يوم ' + day + '">' + svgIcon('trash') + '</button></div>'
                 : '<div class="review-cell review-filled' + color + '">' + content + '</div>';
             }).join('');
             if (admin && !entries.length) cards = '<button type="button" class="review-cell review-empty" data-review-action="edit-cell" data-day="' + dayIdx + '" data-col="' + escapeHtml(col.id) + '" aria-label="إضافة مادة يوم ' + day + ' في ' + escapeHtml(col.time) + '">' + svgIcon('plus') + '<span>إضافة</span></button>';
@@ -142,6 +165,23 @@ function mountReviewGrid(root, data, admin) {
     });
   }
 
+  function deleteReviewEntry(entry, dialog) {
+    if (!confirm('حذف هذه الحصة من جدول المراجعة؟ سيبقى عمود الوقت.')) return;
+    var next = JSON.parse(JSON.stringify(plan));
+    next.entries = next.entries.filter(function (e) { return e.id !== entry.id; });
+    persist(next, null, dialog);
+  }
+
+  function deleteReviewColumn(col, dialog) {
+    var count = plan.entries.filter(function (e) { return e.columnId === col.id; }).length;
+    var message = 'حذف عمود الوقت «' + col.time + '»؟';
+    if (count) message += ' سيُحذف معه ' + count + ' حصة في جميع الأيام.';
+    if (!confirm(message)) return;
+    var next = JSON.parse(JSON.stringify(plan));
+    removeReviewColumn(next, col.id);
+    persist(next, null, dialog);
+  }
+
   function editDialog(mode, dayIdx, col, entry) {
     if (saving) return;
     var dialog = document.createElement('div');
@@ -154,14 +194,14 @@ function mountReviewGrid(root, data, admin) {
     if (selected && !(data.subjects || []).some(function (s) { return s.id === selected; })) subjectOptions += '<option selected value="' + escapeHtml(selected) + '">مادة غير متاحة</option>';
     dialog.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-labelledby="reviewDialogTitle">' +
       '<h3 id="reviewDialogTitle">' + svgIcon('calendar') + ' ' + heading + '</h3>' +
-      (mode === 'cell' ? '<p class="hint">' + days[dayIdx] + ' — تغيير وقت هذه الحصة ينقلها إلى عمود الوقت الجديد فقط.</p>' :
-        '<p class="hint">' + (col ? 'تعديل الوقت يغيّره لجميع الحصص في هذا العمود.' : 'أضف وقتاً لتتمكن من ملء خاناته.') + '</p>') +
+      (mode === 'cell' ? '<p class="hint">' + days[dayIdx] + ' — وقت هذه الحصة مستقل عن بقية الأيام ويظهر داخل الخانة إن اختلف عن وقت العمود.</p>' :
+        '<p class="hint">' + (col ? 'تعديل الوقت يغيّره للحصص التي تتبع وقت العمود، دون تغيير الأوقات الخاصة بالخانات.' : 'أضف وقتاً لتتمكن من ملء خاناته.') + '</p>') +
       '<form class="review-form">' + (mode === 'cell' ? '<label class="field"><span>المادة</span><select class="inp" name="subject" required>' + subjectOptions + '</select></label>' : '') +
-      '<label class="field"><span>الوقت</span><input class="inp" name="time" dir="ltr" maxlength="80" required placeholder="08:30 - 10:30" value="' + escapeHtml(col ? col.time : '') + '"></label>' +
+      '<label class="field"><span>الوقت</span><input class="inp" name="time" dir="ltr" maxlength="80" required placeholder="08:30 - 10:30" value="' + escapeHtml(entry && entry.time ? entry.time : (col ? col.time : '')) + '"></label>' +
       '<p class="hint">مثال: 08:30 - 10:30</p><div class="review-dialog-error" role="alert" hidden></div>' +
       '<div class="acts"><button type="button" class="btn" data-review-close>إلغاء</button>' +
       (entry ? '<button type="button" class="btn btn-danger" data-review-delete>حذف الحصة</button>' : '') +
-      (mode === 'time' && col && !plan.entries.some(function (e) { return e.columnId === col.id; }) ? '<button type="button" class="btn btn-danger" data-review-delete-time>حذف الوقت</button>' : '') +
+      (mode === 'time' && col ? '<button type="button" class="btn btn-danger" data-review-delete-time>حذف عمود الوقت</button>' : '') +
       '<button type="submit" class="btn btn-primary">حفظ</button></div></form></div>';
     document.body.appendChild(dialog);
     var form = dialog.querySelector('form');
@@ -172,39 +212,36 @@ function mountReviewGrid(root, data, admin) {
     dialog.addEventListener('click', function (e) { if (e.target === dialog) close(); });
     dialog.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
     var deleteEntry = dialog.querySelector('[data-review-delete]');
-    if (deleteEntry) deleteEntry.addEventListener('click', function () {
-      if (!confirm('حذف هذه الحصة من جدول المراجعة؟')) return;
-      var next = JSON.parse(JSON.stringify(plan));
-      next.entries = next.entries.filter(function (e) { return e.id !== entry.id; });
-      persist(next, null, dialog);
-    });
+    if (deleteEntry) deleteEntry.addEventListener('click', function () { deleteReviewEntry(entry, dialog); });
     var deleteTime = dialog.querySelector('[data-review-delete-time]');
-    if (deleteTime) deleteTime.addEventListener('click', function () {
-      if (!confirm('حذف هذا الوقت الفارغ؟')) return;
-      var next = JSON.parse(JSON.stringify(plan));
-      next.columns = next.columns.filter(function (c) { return c.id !== col.id; });
-      persist(next, null, dialog);
-    });
+    if (deleteTime) deleteTime.addEventListener('click', function () { deleteReviewColumn(col, dialog); });
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       var time = form.elements.time.value.trim();
       var subjectId = mode === 'cell' ? form.elements.subject.value : '';
       if (!time || (mode === 'cell' && !subjectId)) { showError('يرجى اختيار المادة وكتابة الوقت.'); return; }
       var next = JSON.parse(JSON.stringify(plan));
-      var target = next.columns.find(function (c) { return c.time === time; });
       if (mode === 'time') {
-        if (target && (!col || target.id !== col.id)) { showError('هذا الوقت موجود بالفعل.'); return; }
-        if (col) next.columns.find(function (c) { return c.id === col.id; }).time = time;
-        else next.columns.push({ id: uid('period'), time: time });
-      } else {
-        if (!target) { target = { id: uid('period'), time: time }; next.columns.push(target); }
-        if (next.entries.some(function (item) { return item.dayIdx === dayIdx && item.columnId === target.id && (!entry || item.id !== entry.id); }) && (!entry || entry.columnId !== target.id)) {
-          showError('توجد حصة في هذا اليوم والوقت. اختر وقتاً آخر أو عدّل الحصة الموجودة.'); return;
+        var existingTime = next.columns.find(function (c) { return c.time === time; });
+        if (existingTime && (!col || existingTime.id !== col.id)) {
+          showError('هذا الوقت موجود بالفعل في عمود آخر.'); return;
         }
-        if (entry) {
-          var existing = next.entries.find(function (item) { return item.id === entry.id; });
-          existing.subjectId = subjectId; existing.columnId = target.id;
-        } else next.entries.push({ id: uid('review'), dayIdx: dayIdx, columnId: target.id, subjectId: subjectId });
+        if (col && time !== col.time) {
+          var affectedCount = plan.entries.filter(function (item) {
+            return item.columnId === col.id && !item.time;
+          }).length;
+          if (affectedCount && !confirm('تغيير وقت العمود سيغيّر وقت ' + affectedCount + ' حصة تتبعه. الأوقات الخاصة بالخانات لن تتغير. هل تريد المتابعة؟')) return;
+          if (!renameReviewColumn(next, col.id, time)) { showError('تعذّر تعديل الوقت.'); return; }
+        }
+        if (!col) next.columns.push({ id: uid('period'), time: time });
+      } else if (entry) {
+        var existing = next.entries.find(function (item) { return item.id === entry.id; });
+        existing.subjectId = subjectId;
+        setReviewEntryTime(existing, col, time);
+      } else {
+        var added = { id: uid('review'), dayIdx: dayIdx, columnId: col.id, subjectId: subjectId };
+        setReviewEntryTime(added, col, time);
+        next.entries.push(added);
       }
       persist(next, null, dialog);
     });
@@ -223,6 +260,8 @@ function mountReviewGrid(root, data, admin) {
       if (confirm('نشر النسخة المحلية واستبدال جدول المراجعة المنشور؟')) persist(plan);
     } else if (action === 'add-time') editDialog('time', null, null, null);
     else if (action === 'edit-time' && col) editDialog('time', null, col, null);
+    else if (action === 'delete-time' && col) deleteReviewColumn(col);
+    else if (action === 'delete-cell' && entry) deleteReviewEntry(entry);
     else if (action === 'edit-cell' && col) editDialog('cell', Number(btn.dataset.day), col, entry);
     else if (action === 'import') {
       if (!confirm('نسخ الحصص الحالية من استعمال الزمن واستبدال جدول المراجعة؟ لا يتغير استعمال الزمن الأصلي.')) return;

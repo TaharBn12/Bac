@@ -125,3 +125,68 @@ test('offline drafts stay separate from the published version until explicitly s
   assert.equal(values.has('ayaBacReviewDraft.v1'), false);
   assert.equal(ctx.window.CLOUD_SCHEDULE.review.columns[0].id, 'local');
 });
+
+test('renaming a shared time updates the existing column without adding columns or changing its entries', () => {
+  const { ctx } = context();
+  const plan = { columns: [{ id: 'first', time: '08:00 - 10:00' }, { id: 'next', time: '14:00 - 16:00' }], entries: [
+    { id: 'one', dayIdx: 0, columnId: 'first', subjectId: 'math' },
+    { id: 'two', dayIdx: 1, columnId: 'first', subjectId: 'ar' },
+    { id: 'three', dayIdx: 1, columnId: 'next', subjectId: 'law' },
+  ] };
+  const entries = clone(plan.entries);
+  assert.equal(ctx.renameReviewColumn(plan, 'first', '09:00 - 11:00'), true);
+  assert.equal(plan.columns.length, 2);
+  assert.equal(plan.columns[0].id, 'first');
+  assert.equal(plan.columns[0].time, '09:00 - 11:00');
+  assert.deepEqual(plan.entries, entries);
+  assert.equal(ctx.renameReviewColumn(plan, 'first', '14:00 - 16:00'), false);
+  assert.equal(plan.columns[0].time, '09:00 - 11:00');
+  assert.equal(ctx.renameReviewColumn(plan, 'missing', '12:00'), false);
+});
+
+test('deleting a column removes only its own entries, including an empty column', () => {
+  const { ctx } = context();
+  const plan = { columns: [{ id: 'first', time: '09:00' }, { id: 'next', time: '14:00' }, { id: 'empty', time: '16:00' }], entries: [
+    { id: 'one', dayIdx: 0, columnId: 'first' }, { id: 'two', dayIdx: 1, columnId: 'first' },
+    { id: 'three', dayIdx: 1, columnId: 'next' },
+  ] };
+  ctx.removeReviewColumn(plan, 'first');
+  assert.deepEqual(clone(plan.columns.map(c => c.id)), ['next', 'empty']);
+  assert.deepEqual(clone(plan.entries.map(e => e.id)), ['three']);
+  ctx.removeReviewColumn(plan, 'empty');
+  assert.deepEqual(clone(plan.columns.map(c => c.id)), ['next']);
+  assert.deepEqual(clone(plan.entries.map(e => e.id)), ['three']);
+});
+
+test('editing a single cell time keeps its column and other days unchanged', () => {
+  const { ctx } = context();
+  const plan = { columns: [{ id: 'a', time: '08:00 - 10:00' }], entries: [
+    { id: 'first', dayIdx: 0, subjectId: 'math', columnId: 'a' },
+    { id: 'second', dayIdx: 1, subjectId: 'ar', columnId: 'a' },
+  ] };
+  ctx.setReviewEntryTime(plan.entries[0], plan.columns[0], '17:00 - 19:00');
+  assert.equal(plan.columns.length, 1);
+  assert.equal(plan.columns[0].time, '08:00 - 10:00');
+  assert.equal(plan.entries[0].time, '17:00 - 19:00');
+  assert.equal(plan.entries[0].columnId, 'a');
+  assert.equal(plan.entries[1].time, undefined);
+  ctx.setReviewEntryTime(plan.entries[0], plan.columns[0], '08:00 - 10:00');
+  assert.equal(Object.hasOwn(plan.entries[0], 'time'), false);
+});
+
+test('a custom cell time survives saving and remains independent of a later header edit', async () => {
+  const { ctx } = context();
+  const plan = { columns: [{ id: 'a', time: '08:00 - 10:00' }], entries: [
+    { id: 'first', dayIdx: 0, subjectId: 'math', columnId: 'a' },
+    { id: 'second', dayIdx: 1, subjectId: 'ar', columnId: 'a' },
+  ] };
+  ctx.setReviewEntryTime(plan.entries[0], plan.columns[0], '17:00 - 19:00');
+  assert.equal(ctx.renameReviewColumn(plan, 'a', '09:00 - 11:00'), true);
+  assert.equal(plan.entries[0].time, '17:00 - 19:00');
+  assert.equal(plan.entries[1].time, undefined);
+  ctx.Cloud = { mode: 'cloud', saveReviewPlan: async () => true };
+  ctx.window.CLOUD_SCHEDULE = { review: null, plan: null };
+  assert.equal(await ctx.saveReviewPlan(plan), true);
+  assert.equal(ctx.loadReviewPlan().entries[0].time, '17:00 - 19:00');
+  assert.equal(ctx.loadReviewPlan().columns[0].time, '09:00 - 11:00');
+});
