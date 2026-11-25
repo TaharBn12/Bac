@@ -292,3 +292,85 @@ test('migrated groups and custom times survive local and cloud save and reload',
   assert.equal(sent.entries.find(e => e.id === 'e1').time, '19:00 - 21:00');
   assert.equal(sent.columns.find(c => c.id === sent.entries.find(e => e.id === 'e2').columnId).time, '09:00 - 11:00');
 });
+
+test('Thursday is separated on migration, and every other day can be separated without losing data', () => {
+  const { ctx } = context();
+  const legacy = { version: 2, columns: [
+    { id: 'w', group: 'week', time: '08:00' }, { id: 'end', group: 'weekend', time: '17:00' },
+    { id: 'empty', group: 'weekend', time: '20:00' },
+  ], entries: Array.from({length: 7}, (_, d) => ({ id: 'e'+d, dayIdx: d, columnId: d < 4 ? 'w' : 'end', subjectId: 's', time: d === 4 ? '17:30' : undefined })) };
+  const before = clone(legacy);
+  const plan = ctx.prepareReviewPlan(legacy);
+  assert.deepEqual(clone(legacy), before);
+  assert.deepEqual(clone(ctx.reviewGroups(plan).map(g => g.days)), [[0,1,2,3],[4],[5,6]]);
+  assert.equal(plan.entries.length, 7);
+  assert.notEqual(plan.entries[4].columnId, plan.entries[5].columnId);
+  assert.equal(plan.columns.find(c => c.id === plan.entries[4].columnId).time, '17:00');
+  assert.equal(plan.entries[4].time, '17:30');
+  assert.equal(plan.columns.filter(c => c.group === 'day-4').length, 2);
+  for (const day of [0,1,2,5]) assert.equal(ctx.splitReviewDay(plan, day), true);
+  assert.equal(ctx.splitReviewDay(plan, 6), false);
+  assert.equal(ctx.reviewGroups(plan).length, 7);
+  assert.equal(plan.entries.length, 7);
+  const e = plan.entries[0], col = plan.columns.find(c => c.id === e.columnId);
+  assert.equal(ctx.renameReviewColumn(plan, col.id, '09:00'), true);
+  assert.equal(plan.columns.find(c => c.id === plan.entries[1].columnId).time, '08:00');
+  assert.deepEqual(clone(ctx.prepareReviewPlan(plan)), clone(plan));
+});
+
+test('cell color overrides subject color; subject-wide change affects all existing and future cells', async () => {
+  const {ctx} = context();
+  const plan = ctx.prepareReviewPlan({columns: [], entries: [
+    {id:'a', subjectId:'math'}, {id:'b', subjectId:'math'}, {id:'c', subjectId:'ar'},
+  ]});
+  ctx.setReviewColor(plan, plan.entries[0], '#ff0000', false);
+  assert.equal(ctx.reviewColor(plan, plan.entries[0]), '#ff0000');
+  assert.equal(ctx.reviewColor(plan, plan.entries[1]), '');
+  ctx.setReviewColor(plan, plan.entries[1], '#224466', true);
+  assert.equal(ctx.reviewColor(plan, plan.entries[0]), '#224466');
+  assert.equal(ctx.reviewColor(plan, {subjectId:'math'}), '#224466');
+  assert.equal(ctx.reviewColor(plan, plan.entries[2]), '');
+  ctx.setReviewColor(plan, plan.entries[0], '#abcdef', false);
+  assert.equal(ctx.reviewColor(plan, plan.entries[1]), '#224466');
+  assert.equal(ctx.reviewColor(plan, plan.entries[0]), '#abcdef');
+  assert.equal(await ctx.saveReviewPlan(plan), true);
+  assert.equal(ctx.reviewColor(ctx.loadReviewPlan(), ctx.loadReviewPlan().entries[0]), '#abcdef');
+  ctx.setReviewColor(plan, plan.entries[1], '', true);
+  assert.equal(ctx.reviewColor(plan, plan.entries[0]), '');
+  ctx.setReviewColor(plan, plan.entries[0], 'red; background:url(evil)', false);
+  assert.equal(ctx.reviewColor(plan, plan.entries[0]), '');
+});
+
+test('image upload sends a PNG to temporary hosting for 24 hours and rejects invalid responses', async () => {
+  const { ctx } = context();
+  let fields, request;
+  ctx.FormData = class { constructor() { fields = []; } append(...args) { fields.push(args); } };
+  ctx.fetch = async (url, opts) => { request = {url,opts}; return {ok:true, text: async () => 'https://litter.catbox.moe/example.png\n'}; };
+  const blob = {type:'image/png'};
+  assert.equal(await ctx.uploadReviewImage(blob), 'https://litter.catbox.moe/example.png');
+  assert.equal(request.url, 'https://litterbox.catbox.moe/resources/internals/api.php');
+  assert.equal(request.opts.credentials, 'omit');
+  assert.deepEqual(fields, [['reqtype','fileupload'], ['time','24h'], ['fileToUpload',blob,'review-schedule.png']]);
+  ctx.fetch = async () => ({ok:true, text: async () => 'https://example.com/evil.png'});
+  await assert.rejects(ctx.uploadReviewImage(blob));
+  ctx.fetch = async () => ({ok:false});
+  await assert.rejects(ctx.uploadReviewImage(blob));
+  ctx.fetch = async () => { throw Error('network'); };
+  await assert.rejects(ctx.uploadReviewImage(blob));
+});
+
+test('image contains all seven separate groups and chosen cell colors', () => {
+  const {ctx} = context();
+  const filled = [], texts = [];
+  const canvasCtx = { measureText: s => ({width:String(s).length * 12}), fillRect(){filled.push(this.fillStyle);}, strokeRect(){}, fillText(s){texts.push(String(s));} };
+  let canvas;
+  ctx.document = { createElement: () => (canvas = { getContext: () => canvasCtx }) };
+  ctx.getSubject = () => ({name:'رياضيات'});
+  const plan = ctx.prepareReviewPlan({columns:[{id:'p', time:'08:00'}], entries:[{id:'e',dayIdx:4,columnId:'p',subjectId:'m'}]});
+  for (const day of [0,1,2,5]) ctx.splitReviewDay(plan, day);
+  ctx.setReviewColor(plan, plan.entries[0], '#abcdef', false);
+  ctx.buildReviewCanvas(plan, {});
+  assert.ok(canvas.width > canvas.height);
+  assert.ok(filled.includes('#abcdef'));
+  for (const day of ['الأحد','الإثنين','الثلاثاء','الأربعاء','الخميس','الجمعة','السبت']) assert.ok(texts.includes(day));
+});

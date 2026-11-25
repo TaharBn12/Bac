@@ -2697,3 +2697,10 @@ button.review-filled:hover { background: rgba(124,92,255,.26); }
   .review-image-modal { padding: 15px; }
   .review-image-preview { padding: 5px; }
 }
+.review-group-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.review-color-field input[type="color"] { width: 62px; height: 42px; border: 1px solid var(--border); border-radius: 8px; padding: 3px; background: var(--bg-2); cursor: pointer; }
+.review-filled[style] .review-cell-time { color: inherit; }
+.review-filled[style]::before { background: currentColor; opacity: .45; }
+.review-upload-result { overflow-wrap: anywhere; font-size: 13px; margin-top: 12px; }
+.review-upload-result p { margin: 0 0 8px; }
+.review-upload-result a { color: var(--accent); font-weight: 800; }
